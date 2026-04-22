@@ -1,0 +1,2730 @@
+= Spice Protocol
+:revnumber: v1.0
+:revdate: 01.01.2009
+:revremark: Draft 1
+
+Copyright (C) 2009 Red Hat, Inc. +
+Licensed under a Creative Commons Attribution-Share Alike 3.0 +
+United States License (see
+http://creativecommons.org/licenses/by-sa/3.0/us/legalcode) +
+
+:toc:
+
+== Introduction
+
+Spice protocol defines a set of protocol messages for accessing, controlling,
+and receiving inputs from remote computing devices (e.g., keyboard, video,
+mouse) across networks, and sending output to them. A controlled device can
+reside on either side, client and/or server. In addition, the protocol defines
+a set of calls for supporting migration of a remote server from one  network
+address to another. Encryption of transported data, with one exception, was
+kept out of the protocol for maximum flexibility in choosing an encryption
+method. Spice uses simple messaging and does not depend on any  RPC standard or
+a specific transport layer.
+
+Spice communication session is split into multiple communication channels
+(e.g., every channel is a remote device) in order to have the ability to
+control communication and execution of messages according to the channel type
+(e.g. QoS encryption), and to add and remove  communication channels during run
+time (which is supported by spice protocol definition). The following
+communication channels are defined in the current protocol definition: a). the
+main channel serves as the main spice session connection  b). display channel
+for receiving remote display updates c). inputs channel for sending mouse and
+keyboard events d). cursor channel for receiving pointer shape and position e).
+Playback channel for receiving audio stream, and f). Record channel for sending
+audio capture. More channel types will be added as the protocol evolves. Spice
+also defines a set of protocol definitions for synchronizing channels`
+execution on the remote site.
+
+== Common Protocol definition
+
+. Endianness
++
+Unless stated otherwise, all data structures are packed and byte and bit order
+is in little endian format.
++
+. Data types
++
+.. UINT8 – 8 bits unsigned integer
+.. INT16 – 16 bits signed integer
+.. UINT16 – 16 bits unsigned  integer
+.. UINT32 – 32 bits unsigned  integer
+.. INT32 - 32 bits signed integer
+.. UINT64 – 64 bits unsigned  integer
+.. SPICE_ADDRESS - 64 bits unsigned integer, value is the offset of the addressed
+data from the beginning of spice protocol message body (i.e., data following
+SpiceDataHeader or SpicedSubMessage).
+.. SPICE_FIXED28_4 – 32 bits fixed point number. 28 high bits are signed integer. Low
+4 bits is unsigned integer numerator of a fraction with denominator 16.
+.. POINT
++
+INT32 x +
+INT32 y +
++
+.. POINT16
++
+INT16 x +
+INT16 y +
++
+.. RECT
++
+INT32 top +
+INT32 left +
+INT32 bottom +
+INT32 right +
++
+.. POINTFIX
++
+SPICE_FIXED28_4 x +
+SPICE_FIXED28_4 y +
++
+. Protocol Magic number UINT8[4]
++
+SPICE_MAGIC = { 0x52, 0x45, 0x44,  0x51} // "REDQ"
++
+. Protocol version
++
+Protocol version defined as  two UINT32 values, major protocol version and
+minor protocol version. Server and client having the same major version must
+keep compatibility regardless of minor version (i.e., incrementing the major
+version brakes compatibility). Major protocol version with "huge" value are
+reserved for development purposes and are considered unsupported and
+unreliable. "huge" values are defined as having bit 31 set. The minor protocol
+version is incremented on every protocol change that does not break
+compatibility. It is  set to zero on  major protocol version increment.
++
+.. Current Protocol version
++
+[source,c]
+----
+SPICE_VERSION_MAJOR = 2
+SPICE_VERSION_MINOR = 2
+----
++
+. Compatibility – UINT32[]
++
+In order to allow some degree of flexibility in client and server
+implementation and in order to improve compatibility, spice protocol supports
+bidirectional exchange of channels compatibilities. Compatibilities are
+expressed in UINT32 vector that is split into two groups: common
+compatibilities and channels compatibilities. Common compatibilities stands for
+compatibilities shared by all channels, and  channels compatibilities stands
+for channel specific compatibilities. Splitting the vector into two types
+allows us to add channel compatibilities independently. Each compatibility is
+expressed using one or more bits in the compatibilities vector.
+For example capability 0 will be the low bit of the first (index 0) UINT32.
++
+. Channel types – UINT8
++
+[source,c]
+----
+SPICE_CHANNEL_MAIN 	= 1
+SPICE_CHANNEL_DISPLAY 	= 2
+SPICE_CHANNEL_INPUTS 	= 3
+SPICE_CHANNEL_CURSOR 	= 4
+SPICE_CHANNEL_PLAYBACK 	= 5
+SPICE_CHANNEL_RECORD 	= 6
+SPICE_CHANNEL_TUNNEL	= 7 // obsolete
+SPICE_CHANNEL_SMARTCARD	= 8
+SPICE_CHANNEL_USBREDIR	= 9
+SPICE_CHANNEL_PORT		= 10
+SPICE_CHANNEL_WEBDAV	= 11
+----
++
+. Error codes UINT32
++
+[source,c]
+----
+SPICE_LINK_ERR_OK 			= 0
+SPICE_LINK_ERR_ERROR			= 1
+SPICE_LINK_ERR_INVALID_MAGIC		= 2
+SPICE_LINK_ERR_INVALID_DATA		= 3
+SPICE_LINK_ERR_VERSION_MISMATCH		= 4
+SPICE_LINK_ERR_NEED_SECURED		= 5
+SPICE_LINK_ERR_NEED_UNSECURED		= 6
+SPICE_LINK_ERR_PERMISSION_DENIED	= 7
+SPICE_LINK_ERR_BAD_CONNECTION_ID	= 8
+SPICE_LINK_ERR_CHANNEL_NOT_AVAILABLE	= 9
+----
++
+. Warning codes
++
+[source,c]
+----
+SPICE_WARN_GENERAL 				= 0
+----
++
+. Information codes
++
+[source,c]
+----
+SPICE_INFO_GENERAL				= 0
+----
++
+. public key buffer size.
++
+[source,c]
+----
+SPICE_TICKET_PUBKEY_BYTES = 162 /* size needed for holding 1024 bit RSA public
+key in X.509 SubjectPublicKeyInfo format. */
+----
++
+. Channel link: establishing a channel connection.
++
+.. Connection process
++
+The channel connection process is initiated by the client. The client sends
+SpiceLinkMess. In response, the server sends SpiceLinkReply. When the client
+receives  SpiceLinkReply, it examines the error code and in case there is no
+error it encrypts its password with public key received in SpiceLinkReply and
+sends it to the server. The server receive the password and sends the link
+result to the client. The client examines the link result, and in case the
+result equals to SPICE_LINK_ERR_OK, a valid connection is established.
++
+Channel connection for channel types other then SPICE_CHANNEL_MAIN is allowed
+only after the client has active SPICE_CHANNEL_MAIN channel connection.  Only one
+SPICE_CHANNEL_MAIN connection is allowed, and this channel connection establishes
+spice session with the remote server.
++
+.. Ticketing
++
+Ticketing is a mechanism implemented in spice to ensure connections are opened
+only from authorized sources. To enable this mechanism a ticket is set in spice
+server consisting of a password and time validity. After time validity passes,
+the whole ticket is expired. The ticket is encrypted. To encrypt, server
+generates a 1024 bit RSA key and send the public part to the client (via
+RedLinkInfo). Client uses this key to encrypt the password and send it back to
+server (after SpiceLinkMess). Server decrypt the password, compare it to ticket
+and ensure it was received within the allowed time-frame.
++
+.. SpiceLinkMess definition.
++
+[cols="2*"]
+|===
+|UINT32 magic
+|value of this fields must be equal to SPICE_MAGIC
+
+|UINT32 major_version
+| value of this fields must be equal to SPICE_VERSION_MAJOR
+
+|UINT32 minor_version
+|value of this fields must be equal to SPICE_VERSION_MINOR
+
+|UINT32 size
+|number of bytes following this field to the end of this message.
+
+|UINT32 connection_id
+|In case of a new session (i.e., channel type is SPICE_CHANNEL_MAIN) this field
+is set to zero, and in response the server will allocate session id and will
+send it via the SpiceLinkReply message. In case of all other channel types, this
+field will be equal to the allocated session id.
+
+|UINT8 channel_type
+|one of SPICE_CHANNEL_?
+
+|UINT8 channel_id
+|channel id to connect to. This enables having multiple channels of the same
+type.
+
+|UINT32 num_common_caps
+|number of common client channel capabilities words
+
+|UINT32 num_channel_caps
+|number of specific client channel capabilities words
+
+|UINT32 caps_offset
+|location of the start of the capabilities vector given by the bytes offset
+from the “ size” member (i.e., from the address of the “connection_id” member).
+|===
++
+.. SpiceLinkReply  definition
++
+[cols="2*"]
+|===
+|UINT32 magic
+|value of this field must be equal to SPICE_MAGIC
+
+|UINT32 major_version
+|server major protocol version.
+
+|UINT32 minor_version
+|server minor protocol version.
+
+|UINT32 size
+|number of bytes following this field to the end of this message.
+
+|UINT32  error
+|Error codes (i.e., SPICE_LINK_ERR_?)
+
+|UINT8[SPICE_TICKET_PUBKEY_BYTES]  pub_key
+|1024 bit RSA public key in X.509 SubjectPublicKeyInfo format.
+
+|UINT32 num_common_caps
+|number of common server channel capabilities words
+
+|UINT32 num_channel_caps
+|number of specific server channel capabilities words
+
+|UINT32 caps_offset
+|location of the start of the capabilities vector given by the bytes offset
+from the “ size” member (i.e., from the address of
+the “connection_id” member)
+|===
++
+.. Encrypted Password
++
+Client sends RSA encrypted password, with public key received from server (in
+SpiceLinkReply). Format is EME-OAEP as described in PKCS#1 v2.0 with SHA-1, MGF1
+and an empty encoding parameter.
++
+.. Link Result UINT32
++
+The server sends link result error code (i.e., SPICE_LINK_ERR_?)
++
+. Protocol message definition
++
+All messages transmitted after the link stage have a common message layout. It
+begins with SpiceDataHeader which describes one main message and an optional sub
+messages list.
++
+.. SpiceDataHeader
++
+[cols="2*"]
+|===
+|UINT64 serial
+|serial number of the message within the channel.  Serial numbers start with a
+value of 1 and are incremented on every message transmitted.
+
+|UINT16 type
+|message type can be one that is  accepted by all channel (e.g., SPICE_MSG_MIGRATE),
+or specific to a channel type (e.g., SPICE_MSG_DISPLAY_MODE for display channel).
+
+|UINT32 size
+|size of the message body in bytes. In case sub_list (see below) is not zero
+then the actual main message size is sub_list. The message body follows
+SpiceDataHeader
+
+|UINT32  sub_list
+|optional sub-messages list. If this field is not zero then sub_list is the
+offset in bytes to SpiceSubMessageList from the end of SpiceDataHeader.  All
+sub-messages need to be executed before the main message, and in the order they
+appear in the sub-messageslist.
+|===
++
+.. SpiceSubMessageList
++
+[cols="2*"]
+|===
+|UINT16 size
+|number of sub-messages in this list.
+
+|UINT32[]  sub_messages
+|array of offsets to sub message, offset is number of bytes from the end of
+SpiceDataHeader to start of SpicedSubMessage.
+|===
++
+.. SpicedSubMessage
++
+[cols="2*"]
+|===
+|UINT16  type
+|message type can be one that is  accepted by all channel (e.g., SPICE_MSG_MIGRATE),
+or specific to a channel type (e.g., SPICE_MSG_DISPLAY_MODE for display channel).
+
+|UINT32 size
+|size of the message body in bytes.  The message body follows SpicedSubMessage.
+|===
++
+. Common messages and messaging naming convention
++
+Messages types and message body structures  are prefixed according to the
+source of the message. The prefixes for messages sent from the server to the
+client are SPICE_MSG for types and SpiceMsg for structures. For messages sent from the
+client the prefixes are SPICE_MSGC and SpiceMsgc.
++
+. Server messages that are common to all channels
++
+[source,c]
+----
+SPICE_MSG_MIGRATE 		= 1
+SPICE_MSG_MIGRATE_DATA		= 2
+SPICE_MSG_SET_ACK		= 3
+SPICE_MSG_PING			= 4
+SPICE_MSG_WAIT_FOR_CHANNELS	= 5
+SPICE_MSG_DISCONNECTING		= 6
+SPICE_MSG_NOTIFY		= 7
+
+SPICE_MSG_FIRST_AVAIL 	= 101
+----
++
+Specific channel server messages start from SPICE_MSG_FIRST_AVAIL. All
+message types from SPICE_MSG_NOTIFY + 1 to SPICE_MSG_FIRST_AVAIL – 1 are reserved
+for further use.
++
+. Client messages that are common to all channels
++
+[source,c]
+----
+SPICE_MSGC_ACK_SYNC			= 1
+SPICE_MSGC_ACK				= 2
+SPICE_MSGC_PONG				= 3
+SPICE_MSGC_MIGRATE_FLUSH_MARK		= 4
+SPICE_MSGC_MIGRATE_DATA			= 5
+SPICE_MSGC_DISCONNECTING		= 6
+
+SPICE_MSGC_FIRST_AVAIL		= 101
+----
++
+Specific channel client messages start from SPICE_MSGC_FIRST_AVAIL. All
+message types from SPICE_MSGC_ACK_SYNC+ 1 to SPICE_MSGC_FIRST_AVAIL – 1 are
+reserved for further use.
++
+. Messages acknowledgment.
++
+Spice provides a set of messages for requesting an acknowledgment on every one
+or more messages that the client consumes. In order to request acknowledgment
+messages, the server sends  SPICE_MSG_SET_ACK with the requested acknowledgment
+frequency – after how many received messages the client sends acknowledgment. .
+In response, the client sends  SPICE_MSGC_ACK_SYNC. From this point, for every
+requested number of messages that the client receive, it will send  a SPICE_MSGC_ACK
+message.
++
+.. SPICE_MSG_SET_ACK, SpiceMsgSetAck
++
+[cols="2*"]
+|===
+|UINT32 generation
+|the generation of the acknowledgment sequence. This value will be sent back by
+SPICE_MSGC_ACK_SYNC. It is used for acknowledgment accounting synchronization.
+
+|UINT32 window
+|the window size. Spice client will send acknowledgment for every “window”
+messages.  Zero window size will disable  messages acknowledgment.
+|===
++
+.. SPICE_MSGC_ACK_SYNC, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|Spice client sends  SpiceMsgSetAck.generation in response to SPICE_MSG_SET_ACK
+|===
++
+.. SPICE_MSGC_ACK, VOID
++
+Spice client sends  SPICE_MSGC_ACK message for every SpiceMsgSetAck.window messages it
+consumes.
++
+. Ping
++
+Spice protocol provides ping messages for debugging purpose. Spice server sends
+SPICE_MSG_PING and the client responses with SPICE_MSGC_PONG. The server can measure round
+trip time by subtracting current time with the time that is returned in
+SPICE_MSGC_PONG message.
++
+.. SPICE_MSG_PING, SpiceMsgPing
++
+[cols="2*"]
+|===
+|UINT32 id
+|the id of this message
+
+|UINT64 time
+|time stamp of this message
+|===
++
+.. SPICE_MSGC_PONG, SpiceMsgPing
++
+[cols="2*"]
+|===
+|UINT32 id
+|Spice client copies it from SpiceMsgPing.id
+
+|UINT64 time
+|Spice client copies it from SpiceMsgPing.time
+|===
++
+. Channel migration
++
+Spice supports migration of Spice server. The following common messages
+combined with specific main channel messages is used for migrating channels
+connections between spice servers. We will refer these servers as source and
+destination. Main channel is used for initiating and controlling the migration
+process. The following describes the actual channel migration process.
++
+Channel migration process starts with sending SPICE_MSG_MIGRATE message from the
+server. The client receives the message, examine the attached flags and: if the
+server requests messages flush (i.e., SPICE_MIGRATE_NEED_FLUSH flag is on), the
+client sends SPICE_MSGC_MIGRATE_FLUSH_MARK message to the server. This procedure can
+be used to ensure safe delivery of all mid air messages before performing the
+migration action.  if the server requests data transfer (i.e.,
+SPICE_MIGRATE_NEED_DATA_TRANSFER flag is on), the client expects to receive one
+last message from the server before migrating to destination. This message type
+must be SPICE_MSG_MIGRATE_DATA type. The content of the received message will be
+transmitted to the destination on connection swap.
++
+Afterward, the client swaps communication channels (i.e., starts using the
+connection with the destination server). The client can close connection with
+the source server only after all other channels also have finished the
+migration process. If the server side has requested data transfer, the client
+first transmits SPICE_MSGC_MIGRATE_DATA message containing the data received on
+SPICE_MSG_MIGRATE_DATA.
++
+.. Migration flags
++
+[source,c]
+----
+SPICE_MIGRATE_NEED_FLUSH 			= 1
+SPICE_MIGRATE_NEED_DATA_TRANSFER 		= 2
+----
++
+.. SPICE_MSG_MIGRATE, SpiceMsgMigrate
++
+[cols="2*"]
+|===
+|UINT32 flags
+|combination of SPICE migration flags.
+|===
++
+... SPICE_MSG_MIGRATE_DATA, UINT8[]
++
+Server migrate data, body of this message is variable length raw data that is
+determined by each channel type independently
++
+... SPICE_MSGC_MIGRATE_FLUSH_MARK, VOID
++
+This messages mark completion of client communication channel flushing.
++
+.. SPICE_MSGC_MIGRATE_DATA, UINT8[]
++
+Post migration data, sent by client to the destination, containing the data
+sent by the source using the SPICE_MSG_MIGRATE_DATA message.
++
+[[channel_sync]]
+. Channel synchronization
++
+Spice provides mechanism for synchronizing channels message execution on the
+client side. The server sends SPICE_MSG_WAIT_FOR_CHANNELS message which contains a
+list of channels messages to wait for (i.e., SpiceMsgWaitForChannels). The Spice
+client will wait for completion of all the messages that are in that list
+before executing any more messages.
++
+.. SpiceWaitForChannel
++
+[cols="2*"]
+|===
+|UINT8 type
+|channel type (e.g., SPICE_CHANNEL_INPUTS)
+
+|UINT8 id
+|channel id.
+
+|UIN64 serial
+|message serial id (i.e, SpiceDataHeader.serial) to wait for
+|===
++
+... SPICE_MSG_WAIT_FOR_CHANNELS, SpiceMsgWaitForChannels
++
+[cols="2*"]
+|===
+|UINT8 wait_count
+|number of items in wait_list
+
+|SpiceWaitForChannel[] wait_list
+|list of channels to wait for.
+|===
++
+. Disconnect reason
++
+The following messages are used for notification about orderly disconnection
+of the server or client.
++
+.. SPICE_MSG_DISCONNECTING, SpiceMsgDisconnect
++
+[cols="2*"]
+|===
+|UINT64 time_stamp
+|time stamp of disconnect action on the server.
+
+|UINT32 reason
+|disconnect reason, SPICE_LINK_ERR_?
+|===
++
+.. SPICE_MSGC_DISCONNECTING, SpiceMsgDisconnect
++
+[cols="2*"]
+|===
+|UINT64 time_stamp
+|time stamp of disconnect action on the client.
+
+|UINT32 reason
+|disconnect reason, SPICE_LINK_ERR_?
+|===
++
+. Server notification
++
+Spice protocol defines message for delivering notifications to the client using
+SPICE_MSG_NOTIFY message. Messages are categorized by severity and visibility. The
+later can be used as hint for the way the message is displayed to the user. For
+example high visibility notifications will trigger message box and low
+visibility notifications will be directed to the log.
++
+.. SPICE_MSG_NOTIFY, SpiceMsgNotify
++
+[cols="2*"]
+|===
+|UINT64 time_stamp
+|server side time stamp of this message.
+
+|UINT32 severity
+|one of SPICE_NOTIFY_SEVERITY_?
+
+|UINT32 visibility
+|one of  SPICE_NOTIFY_VISIBILITY_?
+
+|UINT32 what
+|one of SPICE_LINK_ERR_?, SPICE_WARN_? Or SPICE_INFO_?, depending on severity.
+
+|UINT32 message_len
+|size of message
+
+|UINT8[] message
+|message string in UTF8.
+
+|UINT8 0
+|string zero termination
+|===
+
+== Main Channel definition
+
+. Server messages
++
+[source,c]
+----
+SPICE_MSG_MAIN_MIGRATE_BEGIN		= 101
+SPICE_MSG_MAIN_MIGRATE_CANCEL		= 102
+SPICE_MSG_MAIN_INIT			= 103
+SPICE_MSG_MAIN_CHANNELS_LIST		= 104
+SPICE_MSG_MAIN_MOUSE_MODE		= 105
+SPICE_MSG_MAIN_MULTI_MEDIA_TIME		= 106
+
+SPICE_MSG_MAIN_AGENT_CONNECTED		= 107
+SPICE_MSG_MAIN_AGENT_DISCONNECTED	= 108
+SPICE_MSG_MAIN_AGENT_DATA		= 109
+SPICE_MSG_MAIN_AGENT_TOKEN		= 110
+----
++
+. Client messages
++
+[source,c]
+----
+SPICE_MSGC_MAIN_CLIENT_INFO		= 101
+SPICE_MSGC_MAIN_MIGRATE_CONNECTED	= 102
+SPICE_MSGC_MAIN_MIGRATE_CONNECT_ERROR	= 103
+SPICE_MSGC_MAIN_ATTACH_CHANNELS		= 104
+SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST	= 105
+
+SPICE_MSGC_MAIN_AGENT_START		= 106
+SPICE_MSGC_MAIN_AGENT_DATA		= 107
+SPICE_MSGC_MAIN_AGENT_TOKEN		= 108
+----
++
+. Migration control
++
+Spice migration control is performed using the main channel messages. Spice
+server initiates migration process by sending SPICE_MSG_MAIN_MIGRATE_BEGIN message.
+Once the client has completed its pre-migrate procedure it notifies the server
+by transmitting SPICE_MSGC_MAIN_MIGRATE_CONNECTED message. In case of pre-migrate
+procedure error, the client sends SPICE_MSGC_MAIN_MIGRATE_CONNECT_ERROR. Once the server
+receives SPICE_MSGC_MAIN_MIGRATE_CONNECTED he can commence the migration process. The
+server can send SPICE_MSG_MAIN_MIGRATE_CANCEL in order to instruct the client to
+cancel the migration process.
++
+.. SPICE_MSG_MAIN_MIGRATE_BEGIN, SpiceMsgMainMigrationBegin
++
+[cols="2*"]
+|===
+|UINT16 port
+|port of destination server
+
+|UINT16 sport
+|secure port of destination server
+
+|UINT8[] host_name
+|host name of destination server
+|===
++
+.. SPICE_MSG_MAIN_MIGRATE_CANCEL, VOID
++
+Instruct the client to cancel migration process
++
+.. SPICE_MSGC_MAIN_MIGRATE_CONNECTED, VOID
++
+Notify the server of successful completion of the pre-migrate stage
++
+.. SPICE_MSGC_MAIN_MIGRATE_CONNECT_ERROR, VOID
++
+Notify the server of pre-migrate stage error
++
+[[mouse_modes]]
+. Mouse modes
++
+Spice protocol specifies two mouse modes, client mode and server mode. In
+client mode, the affective mouse is the client side mouse: the client sends
+mouse position within the display and the server sends mouse shape messages. In
+server mode, the client sends relative mouse movements and the server sends
+position and shape commands. Spice main channel is used for mouse mode control.
++
+.. Modes
++
+[source,c]
+----
+SPICE_MOUSE_MODE_SERVER = 1
+SPICE_MOUSE_MODE_CLIENT = 2
+----
++
+.. SPICE_MSG_MAIN_MOUSE_MODE, SpiceMsgMainMouseMode
++
+Spice server sends this message on every mouse mode change
++
+[cols="2*"]
+|===
+|UINT32 supported_modes
+|current supported mouse mode, this is any combination of SPICE_MOUSE_MODE_?
+
+|UINT32 current_mode
+|the current mouse mode. Can be one of SPICE_MOUSE_MODE_?
+|===
++
+.. SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST, UINT32
++
+Spice client sends this message to request specific mouse mode. It is not
+guarantied that the server will accept the request. Only on receiving
+SPICE_MSG_MAIN_MOUSE_MODE message, the client can know of actual mouse mode change.
++
+[cols="2*"]
+|===
+|UINT32
+|requested mode, one of SPICE_MOUSE_MODE_?
+|===
++
+. Main channel init message
++
+Spice server must send SpiceMsgMainInit as the first transmitted message t and is
+disallowed to send it at any other point.
++
+.. SPICE_MSG_MAIN_INIT, SpiceMsgMainInit
++
+[cols="2*"]
+|===
+|UINT32 session_id
+|session id is generated by the server. This id will be send on every new
+channel connection within this session (i.e., in SpiceLinkMess.connection_id).
+
+|UINT32 display_channels_hint
+|optional hint of expected number of display channels. Zero is defined as an
+invalid value
+
+|UINT32 supported_mouse_modes
+|supported mouse modes. This is any combination of SPICE_MOUSE_MODE_?
+
+|UINT32 current_mouse_mode
+|the current mouse mode, one of SPICE_MOUSE_MODE_?
+
+|UINT32 agent_connected
+|current state of Spice agent (see <<spice_agent,This Section>>), 0 and 1 stand
+for disconnected and  connected state respectively.
+
+|UINT32 agent_tokens
+|number of available tokens for sending messages to Spice agent.
+
+|UINT32 multi_media_time
+|current server multimedia time. The multimedia time is used for synchronizing
+video (for more information see <<multimedia_time,Multimedia time>>)
+
+|UINT32 ram_hint
+|optional hint for help in determining global LZ compression dictionary size
+(for more information see section <<spice_image,Spice Image>> in “Display
+Channel”).
+|===
++
+. Server side channels notification
++
+In order to have the ability to dynamically attach to the server side channels,
+Spice protocol includes SPICE_MSG_MAIN_CHANNELS_LIST message. This massage informs
+the client of available channels in the server side. In response to this
+message the client can decide to link with the new available channel(s). The
+server must receive SPICE_MSGC_MAIN_ATTACH_CHANNELS before sending any
+SPICE_MSG_MAIN_CHANNELS_LIST message.
++
+.. SPICE_MSG_MAIN_CHANNELS_LIST, SpiceMsgChannels
++
+[cols="2*"]
+|===
+|UINT32 num_of_channels
+|number of channels in this list
+
+|SpiceChannelId[] channels
+|vector of “num_of_channels” channel ids
+|===
++
+.. SpiceChannelId
++
+[cols="2*"]
+|===
+|UINT8 type
+|channel type, one of SPICE_CHANNEL_? channel types, except for SPICE_CHANNEL_MAIN
+
+|UINT8 id
+|channel id
+|===
++
+[[multimedia_time]]
+. Multimedia time
++
+Spice defines messages for setting multimedia time for synchronization of video
+and audio streams. Two methods for updating multimedia time are supported. The
+first method uses the time stamp of data that arrives on the playback
+channel.The second method uses the  main channel SPICE_MSG_MAIN_MULTI_MEDIA_TIME
+message. The latter method is used when  no active playback channel exist.
++
+.. SPICE_MSG_MAIN_MULTI_MEDIA_TIME, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|multimedia time
+|===
++
+[[spice_agent]]
+. Spice agent
++
+Spice protocol defines a set of messages for bidirectional communication
+channel between Spice client and spice client agent on the remote server. Spice
+provides a communication channel only, the actual transferred data content is
+opaque to the protocol. This channel can be used for various purposes, for
+example, client-guest clipboard sharing, authentication and display
+configuration.
++
+Spice client receives notifications of remote site agent connection as part of
+the SPICE_MSG_MAIN_INIT message or by a specific server SPICE_MSG_MAIN_AGENT_CONNECTED.
+Remote agent disconnection notification is delivered by
+SPICE_MSG_MAIN_AGENT_DISCONNECTED message. A bidirectional tokens mechanism is used
+in order to prevent blocking of the main channel with agent messages (e.g., in
+case the agent stops consuming the data). Each side is not allowed to send more
+messages than the tokens allocated to it by the other side. The number of
+tokens that are allocated for the client is initialized from SPICE_MSG_MAIN_INIT
+message, and farther allocation of tokens is done using SPICE_MSG_MAIN_AGENT_TOKEN.
+Server tokens initial count is delivered in SPICE_MSGC_MAIN_AGENT_START message. This
+message must be the first agent related message that the client sends to the
+server. Farther tokens allocation for the server is done using
+SPICE_MSGC_MAIN_AGENT_TOKEN. Actual data packets are delivered using
+SPICE_MSG_MAIN_AGENT_DATA and SPICE_MSGC_MAIN_AGENT_DATA.
++
+.. Although agent messages are opaque for the protocol, agent data stream is
+defined by Spice protocol in order to delineate messages. Still, the
+client-server communication is independent from the agent channel, e.g., agent
+protocol conflicts don't affect the rest of the channels. Agent stream is
+defined as a run of messages having the following format:
++
+[cols="2*"]
+|===
+|UINT32 protocol
+|unique protocol of this message. The protocol id must be registered in order
+to prevent conflicts.
+
+|UINT32 type
+|protocol dependent message type.
+
+|UINT64 opaque
+|protocol dependent opaque data.
+
+|UINT32 size
+|size of data  in bytes.
+
+|UINT8 data[0]
+|data of this message.
+|===
++
+Client and server must continue processing unknown protocols messages or
+messages having unknown type (i.e., receive and dump).
++
+.. SPICE_MSG_MAIN_AGENT_CONNECTED, VOID
+.. SPICE_MSG_MAIN_AGENT_DISCONNECTED, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|disconnect error code SPICE_LINK_ERR_?
+|===
++
+.. SPICE_AGENT_MAX_DATA_SIZE = 2048
+.. SPICE_MSG_MAIN_AGENT_DATA, UINT8[]
++
+Agent packet is the entire message body (i.e. SpiceDataHeader.size). The maximum
+packet size is SPICE_AGENT_MAX_DATA_SIZE.
++
+.. SPICE_MSG_MAIN_AGENT_TOKEN, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|allocated tokens count for the client
+|===
++
+.. SPICE_MSGC_MAIN_AGENT_START, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|allocated tokens count for the server
+|===
++
+.. SPICE_MSGC_MAIN_AGENT_DATA, UINT8[]
++
+Agent packet is the entire message body (i.e. SpiceDataHeader.size). The maximum
+packet size is SPICE_AGENT_MAX_DATA_SIZE.
++
+.. SPICE_MSGC_MAIN_AGENT_TOKEN, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|allocated tokens count for the server
+|===
+
+== Inputs channel definition
+
+Spice Inputs channel controls the server mouse and the keyboard.
+
+. Client messages
++
+[source,c]
+----
+SPICE_MSGC_INPUTS_KEY_DOWN 		= 101
+SPICE_MSGC_INPUTS_KEY_UP 		= 102
+SPICE_MSGC_INPUTS_KEY_MODIFIERS 	= 103
+
+SPICE_MSGC_INPUTS_MOUSE_MOTION 		= 111
+SPICE_MSGC_INPUTS_MOUSE_POSITION	= 112
+SPICE_MSGC_INPUTS_MOUSE_PRESS		= 113
+SPICE_MSGC_INPUTS_MOUSE_RELEASE		= 114
+----
++
+. Server Messages
++
+[source,c]
+----
+SPICE_MSG_INPUTS_INIT 			= 101
+SPICE_MSG_INPUTS_KEY_MODIFIERS 		= 102
+
+SPICE_MSG_INPUTS_MOUSE_MOTION_ACK 	= 111
+----
++
+. Keyboard messages
++
+Spice supports sending keyboard key events and keyboard leds synchronization.
+The client sends  key event using SPICE_MSGC_INPUTS_KEY_DOWN and SPICE_MSGC_INPUTS_KEY_UP
+messages. Key value is expressed using PC AT scan code (see
+<<key_code,KeyCode>>).   Keyboard leds synchronization is done by sending
+SPICE_MSG_INPUTS_KEY_MODIFIERS message by the server or by sending
+SPICE_MSGC_INPUTS_KEY_MODIFIERS by the client, these messages contain keyboard leds
+state. Keyboard modifiers is also sent by the server using SPICE_MSG_INPUTS_INIT,
+this message must be sent as the first server message and the server mustn't
+send it  at any other point.
++
+.. Keyboard led bits
++
+[source,c]
+----
+SPICE_SCROLL_LOCK_MODIFIER 	= 1
+SPICE_NUM_LOCK_MODIFIER 	= 2
+SPICE_CAPS_LOCK_MODIFIER 	= 4
+----
++
+.. SPICE_MSG_INPUTS_INIT, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|any combination of keyboard led bits. If bit is set then the led is on.
+|===
++
+.. SPICE_MSG_INPUTS_KEY_MODIFIERS, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|any combination of keyboard led bits. If bit is set then the led is on.
+|===
++
+.. SPICE_MSGC_INPUTS_KEY_MODIFIERS, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|any combination of keyboard led bits. If bit is set then the led is on.
+|===
++
+[[key_code]]
+.. KeyCode
++
+[cols="2*"]
+|===
+|UINT8[4]
+|the value of key code is a PC AT scan code. The code is composed by up to four
+bytes for supporting extended codes. A code is terminated by a zero byte.
+|===
++
+.. SPICE_MSGC_INPUTS_KEY_DOWN, KeyCode
++
+[cols="2*"]
+|===
+|KeyCode
+|client sends this message to notify of key press event.
+|===
++
+.. SPICE_MSGC_INPUTS_KEY_UP,  KeyCode
++
+KeyCode – client sends this message to notify of key release event.
++
+. Mouse messages
++
+spice support two modes of mouse operation: client mouse and server mouse (for
+more information see <<mouse_modes,mouse modes>>). in  server mouse mode the
+client sends mouse motion message (i.e., msgc_inputs_mouse_motion), and in
+client mouse mode it sends position message (i.e., msgc_inputs_mouse_position).
+position message holds the position of the client mouse on the display and the
+id of the display channel, which is derived from SpiceLinkMess.channel_id. in
+order to prevent flood of mouse motion/position events, the server sends
+red_inputs_mouse_motion_ack message on every red_motion_ack_bunch messages it
+receive. this mechanism allows the client to keep track on  the server's
+messages consumption rate  and to change the event pushing policy according to
+it. mouse button events are sent to the server using msgc_inputs_mouse_press
+and msgc_inputs_mouse_release messages.
++
+.. Spice Button ID
++
+[source,c]
+----
+SPICE_MOUSE_BUTTON_LEFT 	= 1, left button
+SPICE_MOUSE_BUTTON_MIDDLE 	= 2, middle button
+SPICE_MOUSE_BUTTON_RIGHT 	= 3, right button
+SPICE_MOUSE_BUTTON_UP 		= 4, scroll up button
+SPICE_MOUSE_BUTTON_DOWN 	= 5, scroll down button
+----
++
+.. Buttons masks
++
+[source,c]
+----
+SPICE_MOUSE_BUTTON_MASK_LEFT 		= 1,  left button mask
+SPICE_MOUSE_BUTTON_MASK_MIDDLE 		= 2,  middle button mask
+SPICE_MOUSE_BUTTON_MASK_RIGHT 		= 4, right button mask
+----
++
+.. SPICE_INPUT_MOTION_ACK_BUNCH
++
+[source,c]
+----
+SPICE_INPUT_MOTION_ACK_BUNCH		= 4
+----
++
+.. SPICE_MSGC_INPUTS_MOUSE_MOTION, SpiceMsgcMouseMotion
++
+[cols="2*"]
+|===
+|INT32 dx
+|number of pixels the mouse had moved on x axis
+
+|INT32 dy
+|number of pixels the mouse had moved on y axis
+
+|UINT32 buttons_state
+|any combination of buttons mask. Set bit describe pressed button and clear bit
+describe unpressed button.
+
+|===
++
+.. SPICE_MSGC_INPUTS_MOUSE_POSITION, SpiceMsgcMousePosition
++
+[cols="2*"]
+|===
+|UINT32 x
+|position on x axis
+
+|UINT32 y
+|position on y axis
+
+|UINT32  buttons_state
+|any combination of buttons mask. Set bit describe pressed button and clear bit
+describe unpressed button.
+
+|UINT8 display_id
+|id of the display that client mouse is on.
+|===
++
+.. SPICE_MSGC_INPUTS_MOUSE_PRESS, SpiceMsgcMousePress
++
+[cols="2*"]
+|===
+|UINT32 button
+|one of SPICE_MOUSE_?BUTTON
+
+|UINT32  buttons_state
+|any combination of buttons masks. Set bit describes pressed button, and clear
+bit describes unpressed button.
+|===
++
+.. SPICE_MSGC_INPUTS_MOUSE_RELEASE, SpiceMsgcMouseRelease
++
+[cols="2*"]
+|===
+|UINT32 button
+|one of SPICE_MOUSE_?BUTTON
+
+|UINT32  buttons_state
+|any combination of buttons mask. Set bit describes pressed button and clear
+bit describes unpressed button.
+|===
+
+== Display channel definition
+
+Spice protocol defines a set of messages for supporting rendering of the remote
+display area on the client display. The protocol supports rendering of graphics
+primitives (e.g., lines, images) and video streams. The protocol also supports
+caching of images and color palettes on the client side. Spice display channel
+supports several images compression methods for reducing network traffic.
+
+. Server messages
++
+[source,c]
+----
+SPICE_MSG_DISPLAY_MODE 				= 101
+SPICE_MSG_DISPLAY_MARK 				= 102
+SPICE_MSG_DISPLAY_RESET 			= 103
+SPICE_MSG_DISPLAY_COPY_BITS 			= 104
+
+SPICE_MSG_DISPLAY_INVAL_LIST 			= 105
+SPICE_MSG_DISPLAY_INVAL_ALL_PIXMAPS		= 106
+SPICE_MSG_DISPLAY_INVAL_PALETTE 		= 107
+SPICE_MSG_DISPLAY_INVAL_ALL_PALETTES 		= 108
+
+SPICE_MSG_DISPLAY_STREAM_CREATE 		= 122
+SPICE_MSG_DISPLAY_STREAM_DATA			= 123
+SPICE_MSG_DISPLAY_STREAM_CLIP			= 124
+SPICE_MSG_DISPLAY_STREAM_DESTROY		= 125
+SPICE_MSG_DISPLAY_STREAM_DESTROY_ALL		= 126
+
+SPICE_MSG_DISPLAY_DRAW_FILL			= 302
+SPICE_MSG_DISPLAY_DRAW_OPAQUE			= 303
+SPICE_MSG_DISPLAY_DRAW_COPY			= 304
+SPICE_MSG_DISPLAY_DRAW_BLEND			= 305
+SPICE_MSG_DISPLAY_DRAW_BLACKNESS		= 306
+SPICE_MSG_DISPLAY_DRAW_WHITENESS		= 307
+SPICE_MSG_DISPLAY_DRAW_INVERS			= 308
+SPICE_MSG_DISPLAY_DRAW_ROP3			= 309
+SPICE_MSG_DISPLAY_DRAW_STROKE			= 310
+SPICE_MSG_DISPLAY_DRAW_TEXT			= 311
+SPICE_MSG_DISPLAY_DRAW_TRANSPARENT		= 312
+SPICE_MSG_DISPLAY_DRAW_ALPHA_BLEND		= 313
+----
++
+. Client messages
++
+[source,c]
+----
+SPICE_MSGC_DISPLAY_INIT 			= 101
+----
++
+. Operation flow
++
+Spice server sends to the client a mode message using SPICE_MSG_DISPLAY_MODE for
+specifying the current draw area size and format. In response the client
+creates a draw area for rendering all the followed rendering commands sent by
+the server. The client will expose the new remote display area content (i.e.,
+after mode command) only after it receives a mark command (i.e.,
+SPICE_MSG_DISPLAY_MARK) from the server. The server can send a reset command using
+SPICE_MSG_DISPLAY_RESET to instruct the client to drop its draw area and palette
+cache.  Sending  mode message is allowed only while no active draw area exists
+on the client side. Sending reset message is  allowed only while active draw
+area exists on client side. Sending mark message is allowed only once, between
+mode and reset messages. Draw commands, copy bits command and stream commands
+are allowed only if the client have an active display area (i.e., between
+SPICE_MSG_DISPLAY_MODE to SPICE_MSG_DISPLAY_RESET).
++
+On channel connection, the client optionally sends an init message, using
+SPICE_MSGC_DISPLAY_INIT, in order to enable image caching and global dictionary
+compression. The message includes the cache id and its size and the size of the
+dictionary compression window. These sizes and id are determined by the client.
+It is disallowed to send more then one init message.
++
+Color pallets cache are manged by the server.
+Items cache insertion commands are sent as part of  the rendering commands.
+Cache items removal are sent explicitly using SPICE_MSG_DISPLAY_INVAL_LIST or
+SPICE_MSG_DISPLAY_INVAL_LIST server messages. Resetting client caches is done by
+sending SPICE_MSG_DISPLAY_INVAL_ALL_PIXMAPS or SPICE_MSG_DISPLAY_INVAL_ALL_PALETTES server
+messages.
++
+. Draw area control
++
+.. SPICE_MSG_DISPLAY_MODE,  SpiceMsgDisplayMode
++
+[cols="2*"]
+|===
+|UINT32 width
+|width of the display area
+
+|UINT32 height
+|height of the display area
+
+|UINT32 depth
+|color depth of the display area. Valid values are 16bpp  or 32bpp.
+|===
++
+.. SPICE_MSG_DISPLAY_MARK, VOID
++
+Mark the beginning of the display area visibility
++
+.. SPICE_MSG_DISPLAY_RESET, VOID
++
+Drop current display area of the channel and reset palette cache
++
+. Raster operation descriptor
++
+The following defines a set of flags for describing raster operations that can
+be applied on a source image, source brush, destination and the result during a
+rendering operation. Combination of those flags defines the necessary steps
+that are needed to be preformed during a rendering operation. In the
+following definitions of rendering commands this combination is referred to by
+'rop_descriptor'.
++
+[source,c]
+----
+SPICE_ROPD_INVERS_SRC 		= 1
+----
++
+Source Image need to be inverted before rendering
++
+[source,c]
+----
+SPICE_ROPD_INVERS_BRUSH 	= 2
+----
++
+SpiceBrush need to be inverted before rendering
++
+[source,c]
+----
+SPICE_ROPD_INVERS_DEST 		= 4
+----
++
+Destination area need to be inverted before rendering
++
+[source,c]
+----
+SPICE_ROPD_OP_PUT 		= 8
+----
++
+SpiceCopy operation should be used.
++
+[source,c]
+----
+SPICE_ROPD_OP_OR 		= 16
+----
++
+OR operation should be used.
++
+[source,c]
+----
+SPICE_ROPD_OP_AND 		= 32
+----
++
+AND operation should be used.
++
+[source,c]
+----
+SPICE_ROPD_OP_XOR 		= 64
+----
++
+XOR operation should be used.
++
+[source,c]
+----
+SPICE_ROPD_OP_BLACKNESS 	= 128
+----
++
+Destination pixel should be replaced by black
++
+[source,c]
+----
+SPICE_ROPD_OP_WHITENESS 	= 256
+----
++
+Destination pixel should be replaced by white
++
+[source,c]
+----
+SPICE_ROPD_OP_INVERS 		= 512
+----
++
+Destination pixel should be inverted
++
+[source,c]
+----
+SPICE_ROPD_INVERS_RES 		= 1024
+----
++
+Result of the operation needs to be inverted
++
+OP_PUT, OP_OR, OP_AND, OP_XOR, OP_BLACKNESS, OP_WHITENESS, and OP_INVERS are
+mutually exclusive
++
+OP_BLACKNESS, OP_WHITENESS, and OP_INVERS are exclusive
++
+. Raw raster image
++
+The following section describes Spice raw raster image (Pixmap). Pixmap is one
+of several ways to transfer images in Spice protocol (for more information see
+<<spice_image,Spice Image>>).
++
+.. Pixmap format types
++
+[source,c]
+----
+PIXMAP_FORMAT_1BIT_LE 		= 1
+----
++
+1 bit per pixel and bits order is little endian. Each pixel value is an index
+in a color table. The color table size is 2.
++
+[source,c]
+----
+PIXMAP_FORMAT_1BIT_BE 		= 2
+----
++
+1 bit per pixel and bits order is big endian. Each pixel value is index in a
+color table. The color table size is 2.
++
+[source,c]
+----
+PIXMAP_FORMAT_4BIT_LE 		= 3
+----
++
+4 bits per pixel and nibble order inside a byte is little endian. Each pixel
+value is an index in a color table. The color table size is 16.
++
+[source,c]
+----
+PIXMAP_FORMAT_4BIT_BE 		= 4
+----
++
+4 bits per pixel and nibble order inside a byte is big endian. Each pixel value
+is an index in a color table. The color table size is 16.
++
+[source,c]
+----
+PIXMAP_FORMAT_8BIT		= 5
+----
++
+8 bits per pixel. Each pixel value is an index in a color table. The color
+table size is 256.
++
+[source,c]
+----
+PIXMAP_FORMAT_16BIT		= 6
+----
++
+pixel format is 16 bits RGB555.
++
+[source,c]
+----
+PIXMAP_FORMAT_24BIT		= 7
+----
++
+pixel format is 24 bits RGB888.
++
+[source,c]
+----
+PIXMAP_FORMAT_32BIT		= 8
+----
++
+pixel format is 32 bits RGB888.
++
+[source,c]
+----
+PIXMAP_FORMAT_RGBA		= 9
+----
++
+pixel format is 32 bits ARGB8888.
++
+.. SpicePalette
++
+[cols="2*"]
+|===
+|UINT64 id
+|unique id of the palette
+
+|UINT16 table_size
+|number of entries in the color table
+
+|UINT32[] color_table
+|each entry is RGB555 or RGB888 color depending on the current display area
+mode. If  display area mode color depth is 32, the effective format is  RGB888.
+If  display area mode color depth is 16 the effective format is  RGB555.
+|===
++
+.. Pixmap flags
++
+[source,c]
+----
+PIXMAP_FLAG_PAL_CACHE_ME 	= 1
+----
++
+Instruct the client to add the palette to cache
++
+[source,c]
+----
+PIXMAP_FLAG_PAL_FROM_CACHE 	= 2
+----
++
+Instruct the client to retrieve palette from cache.
++
+[source,c]
+----
+PIXMAP_FLAG_TOP_DOWN 		= 4
+----
++
+Pixmap lines are ordered from top to bottom (i.e., line 0 is the highest line).
++
+.. Pixmap
++
+[cols="2*"]
+|===
+|UINT8 format
+|one of PIXMAP_FORMAT_?
+
+|UINT8 flags
+|combination of PIXMAP_FLAG_?
+
+|UINT32 width
+|width of the pixmap
+
+|UINT32 height
+|height of the pixmap
+
+|UINT32 stride
+|number of bytes to add for moving from the beginning of line n to the
+beginning  of line n+1
+
+a|
+[source,c]
+----
+union {
+	SPICE_ADDRESS palette;
+	UINT64 palette_id;
+}
+----
+|address of the color palette (must be zero if no color table is required for format) *or* id of the palette (valid if FLAG_PAL_FROM_CACHE is set).
+
+|SPICE_ADDRESS data
+|address of line 0 of the pixmap.
+|===
++
+. LZ with palette
++
+This section describes a data structure that is combination of a color palette
+and a compressed pixmap data. The pixmap is compressed using our implementation
+of LZSS algorithm (see next section). Each decoded pixel value is an index in
+the color palette.
++
+.. LZPalette Flags
++
+[source,c]
+----
+LZPALETTE_FLAG_PAL_CACHE_ME		= 1
+----
++
+Instruct the client to add the palette to the cache
++
+[source,c]
+----
+LZPALETTE_FLAG_PAL_FROM_CACHE		= 2
+----
++
+Instruct the client to retrieve palette from the cache.
++
+[source,c]
+----
+LZPALETTE_FLAG_TOP_DOWN			= 4
+----
++
+pixmap lines are ordered from top to bottom (i.e. line 0 is the highest line).
++
+.. LZPalette
++
+[cols="2*"]
+|===
+|UINT8 flags
+|combination of LZPALETTE_FLAG_?
+
+|UINT32 data_size
+|size of compressed data
+
+a|
+[source,c]
+----
+union {
+	SPICE_ADDRESS palette;
+	UINT64 palette_id;
+}
+----
+|address of the color palette (see SpicePalette section in “Raw raster image”)[zero value
+is disallowed] *or* id of the palette (valid if FLAG_PAL_FROM_CACHE).
+
+|UINT8[] data
+|compressed pixmap
+|===
++
+[[spice_image]]
+. Spice Image
++
+The following section describes Spice image. Spice image is used in various
+commands and data structures for representing a raster image. Spice image
+supports several compression types in addition to the raw mode: Quic, LZ and
+GLZ. Quic is a predictive coding algorithm. It is a generalization of SFALIC
+from gray-scale to color images withe addition of RLE encoding. By LZ we refer
+to the our implementation of the LZSS algorithm, which was adjusted for images
+in different formats. By GLZ we refer to an extension of LZ that allows it to
+use a dictionary that is based on a set of images and not just on the image
+being compressed.
++
+.. Image types
++
+[source,c]
+----
+IMAGE_TYPE_PIXMAP 		= 0
+SPICE_IMAGE_TYPE_QUIC 		= 1
+SPICE_IMAGE_TYPE_LZ_PLT 	= 100
+SPICE_IMAGE_TYPE_LZ_RGB 	= 101
+SPICE_IMAGE_TYPE_GLZ_RGB 	= 102
+SPICE_IMAGE_TYPE_FROM_CACHE	= 103
+----
++
+.. Image flags
++
+IMAGE_FLAG_CACHE_ME = 1, this flag instruct the client to add the image to
+image cache, cache key is SpiceImageDescriptor.id (see below).
++
+.. SpiceImageDescriptor
++
+[cols="2*"]
+|===
+|UINT64 id
+|unique id of the image
+
+|UINT8 type
+|type of the image. One of IMAGE_TYPE_?
+
+|UINT8 flags
+|any combination of IMAGE_FLAG_?
+
+|UINT32 width
+|width of the image
+
+|UINT32 height
+|height of the image
+|===
++
+.. Image data
++
+Image data follows SpiceImageDescriptor and its content depends on
+SpiceImageDescriptor.type:
++
+* In case of PIXMAP – content is Pixmap.
+* In case of QUIC – content is Quic compressed image. Data begins with   the
+size of the compressed data, represented by UINT32,  followed by the compressed
+data.
+* In case of LZ_PLT – content is  LZPalette.
+* In case of LZ_RGB – content is LZ_RGB  – LZ encoding of an RGB image. Data
+begins with  the size of the compressed data, represented by UINT32, followed
+by the compressed data.
+* In case of GLZ_RGB – content is GLZ_RGB – GLZ encoding of an RGB image. Data
+begins with the size of the compressed data, represented by UINT32, ,  followed
+by the compressed data.
+* In case of FROM_CACHE –  No image data. The client should use
+SpiceImageDescriptor.id to retrieve the relevant image from cache.
++
+. Glyph SpiceString
++
+Glyph string defines an array of glyphs for rendering. Glyphs in a string can
+be in A1, A4 or A8  format (i.e., 1bpp, 4bpp, or 8bpp alpha mask). Every glyph
+contains its rendering position on the destination draw area.
++
+.. SpiceRasterGlyph
++
+[cols="2*"]
+|===
+|POINT render_pos
+|location of the glyph on the draw area
+
+|POINT glyph_origin
+|origin of the glyph. The origin is relative to the upper left corner of the
+draw area. Positive value on x axis advances leftward and  positive value on y
+axis advances upward.
+
+|UINT16 width
+|glyph's width
+
+|UINT16 height
+|glyph's height
+
+|UINT8[] data
+|alpha mask of the glyph. Actual mask data depends on the glyph string's flags.
+If the format is A1 then the line stride is ALIGN(width, 8) / 8. If the format
+is A4,  the line stride is ALIGN(width, 2) / 2. If the format is A8,  the line
+stride is width.
+|===
++
+.. Glyph SpiceString flags
++
+[source,c]
+----
+GLYPH_STRING_FLAG_RASTER_A1 			= 1
+----
++
+Glyphs type is 1bpp alpha value (i.e., 0 is transparent 1 is opaque)
++
+[source,c]
+----
+GLYPH_STRING_FLAG_RASTER_A4 			= 2
+----
++
+Glyphs type is 4bpp alpha value (i.e., 0 is transparent 16 is opaque)
++
+[source,c]
+----
+GLYPH_STRING_FLAG_RASTER_A8 			= 4
+----
++
+Glyphs type is 4bpp alpha value (i.e., 0 is transparent 256 is opaque)
++
+[source,c]
+----
+GLYPH_STRING_FLAG_RASTER_TOP_DOWN 		= 8
+----
++
+Line 0 is the top line of the mask
++
+.. GlyphString
++
+[cols="2*"]
+|===
+|UINT16 length
+|number of glyphs
+
+|UINT16 flags
+|combination of GLYPH_STRING_FLAG_?
+
+|UINT8[] data
+|glyphs
+|===
++
+. Data Types
++
+.. RectList
++
+[cols="2*"]
+|===
+|UINT32 count
+|number of RECT items in rects
+
+|RECT[] rects
+|array of <count> RECT
+|===
++
+.. Path segment flags
++
+[source,c]
+----
+PATH_SEGMENT_FLAG_BEGIN 	= 1
+----
++
+this segment begins a new path
++
+[source,c]
+----
+PATH_SEGMENT_FLAG_END 		= 2
+----
++
+this segment ends the current path
++
+[source,c]
+----
+PATH_SEGMENT_FLAG_CLOSE 	= 8
+----
++
+this segment closes the path and is invalid if PATH_SEGMENT_FLAG_END is not set
++
+[source,c]
+----
+PATH_SEGMENT_FLAG_BEZIER 	= 16
+----
++
+this segment content is a Bezier curve
++
+.. SpicePathSeg
++
+[cols="2*"]
+|===
+|UINT32 flags
+|any combination of PATH_SEGMENT_FLAG_?
+
+|UINT32 count
+|number of points in the segment
+
+|POINTFIX[] points
+|segment points
+|===
++
+.. PathSegList
++
+List of SpicePathSeg items. End of the list is reached if the sum of all previous
+PathSegs' sizes is equal to  list_size. Address of next segment is the address
+of SpicePathSeg.points[SpicePathSeg.count]
++
+[cols="2*"]
+|===
+|UINT32 list_size
+|total size of in bytes of all PathSegs in the list,
+|===
++
+SpicePathSeg seg0 – first path segment.
++
+.. SpiceClip types
++
+[source,c]
+----
+SPICE_CLIP_TYPE_NONE 		= 0
+----
++
+no clipping
++
+[source,c]
+----
+SPICE_CLIP_TYPE_RECTS		= 1
+----
++
+data is RectList and union of all rectangles in RectList is the effective clip
++
+[source,c]
+----
+SPICE_CLIP_TYPE_PATH		= 2
+----
++
+data is PathSegList and the figure described by PathSegList is the effective
+clip
++
+.. SpiceClip
++
+[cols="2*"]
+|===
+|UIN32 type
+|one of CLIP_TYPE_?
+
+|SPICE_ADDRESS data
+|address of clip data. The content depends on <type>
+|===
++
+.. Mask flags
++
+[source,c]
+----
+MASK_FLAG_INVERS 	= 1, the effective mask is the inverse of the mask
+----
++
+.. Mask
++
+[cols="2*"]
+|===
+|UINT8 flags | flags of the mask, combination of MASK_FLAG_?
+
+|POINT position | origin of the mask in bitmap coordinates
+
+|SPICE_ADDRESS bitmap | address of the mask's image, the format of the image must be
+1bpp. If the bitmap is zero then no masking operation needs to be preformed.
+|===
++
+In all rendering commands, the mask must be big enough to cover the destination
+rectangle
++
+.. SpiceBrush types
++
+[source,c]
+----
+SPICE_BRUSH_TYPE_NONE		= 0 /* the brush is invalid */
+SPICE_BRUSH_TYPE_SOLID		= 1 /* the brush is solid RGB color */
+SPICE_BRUSH_TYPE_PATTERN	= 2 /* the brush is a pattern */
+----
++
+.. SpicePattern
++
+[cols="2*"]
+|===
+|SPICE_ADDRESS image
+|address of the pattern's Image
+
+|POINT position
+|origin coordinates of the pattern in the image
+|===
++
+.. SpiceBrush
++
+[cols="2*"]
+|===
+|UINT32 type
+|one of BRUSH_TYPE_?
+|===
++
+[source,c]
+----
+Union {
+	UINT32 color; */ RGB color. The format of the color depends on current
+draw area mode.*/
+	SpicePattern pattern;
+}
+----
++
+.. Image scale mode
++
+The following defines the method for scaling image
++
+[source,c]
+----
+SPICE_IMAGE_SCALE_MODE_INTERPOLATE 	= 0
+----
++
+The client is allowed to INTERPOLATE pixel color.
++
+[source,c]
+----
+SPICE_IMAGE_SCALE_MODE_NEAREST 		= 1
+----
++
+The client must use the nearest pixel.
++
+.. LineAtrr flags
++
+[source,c]
+----
+LINE_ATTR_FLAG_START_WITH_GAP 		= 4
+----
++
+first style segment if gap (i.e., foreground)
++
+[source,c]
+----
+LINE_ATTR_FLAG_STYLED 			= 8
+----
++
+style member of LineAtrr is valid and contains effective line style for the
+rendering operation.
++
+.. LineAtrr join style
++
+[source,c]
+----
+LINE_ATTR_JOIN_ROUND 			= 0
+LINE_ATTR_JOIN_BEVEL		 	= 1
+LINE_ATTR_JOIN_MITER 			= 2
+----
++
+.. LineAtrr cap style
++
+[source,c]
+----
+LINE_ATTR_CAP_ROUND 			= 0
+LINE_ATTR_CAP_SQUARE 			= 1
+LINE_ATTR_CAP_BUTT 			= 2
+----
++
+.. SpiceLineAttr
++
+[cols="2*"]
+|===
+|UINT8 flags
+|combination of LINE_ATTR_?
+
+|UINT8 join_style
+|one of LINE_ATTR_JOIN_?
+
+|UINT8 cap_style
+|one of LINE_ATTR_CAP_?
+
+|UINT8 style_num_segments
+|number of style segments in line style
+
+|SPICE_FIXED28_4 width
+|width of the line in pixels
+
+|SPICE_FIXED28_4 miter_limit
+|miter limit in pixels
+
+| SPICE_ADDRESS style
+|address of line style line style is array of SPICE_FIXED28_4. The array defines
+segments that each represents length of  foreground or background pixels in the
+style. If FLAG_START_WITH_GAP is defined then the first segment in the style is
+background, otherwise it is foreground. Renderer uses  this array of segments
+repeatedly during rendering operation.
+|===
++
+. Rendering command
++
+.. SpiceMsgDisplayBase
++
+Common field to all rendering command
++
+[cols="2*"]
+|===
+|RECT bounding_box
+|the affected area on the display area
+
+|SpiceClip clip
+|the effective clip to set before rendering a command
+|===
++
+.. SPICE_MSG_DISPLAY_COPY_BITS
++
+[source,c]
+----
+SpiceMsgDisplayBase
+POINT source_position
+----
++
+SpiceCopy bits from the draw area to bounding_box on the draw area. Source area left
+top corner is source_position and its height and width is equal to bounding_box
+height and width. Source and  destination rectangles can overlap.
++
+.. SPICE_MSG_DISPLAY_DRAW_FILL
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SpiceBrush brush
+UINT16 rop_descriptor
+Mask mask
+----
++
+SpiceFill  bounding_box using brush as the fill pattern and rop_descriptor
+instructions. If the mask is valid, it will limit the modified area (i.e., only
+pixels on the destination area that their corresponding bits are set will be
+affected).
++
+.. SPICE_MSG_DISPLAY_DRAW_OPAQUE
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS source_image
+RECT source_area
+SpiceBrush brush
+UINT16 rop_descriptor
+UINT8 scale_mode
+Mask mask
+----
++
+Combine pixels from source_area in source_image with the brush's pattern using
+rop_descriptor instructions. The result image will be rendered into
+bounding_box. In case scaling of source image is required it will be performed
+according to scale_mode and before the combination with brush pixels. If mask
+is valid it will limit the modified area.
++
+.. SPICE_MSG_DISPLAY_DRAW_COPY
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS source_image
+RECT source_area
+UINT16 rop_descriptor
+UINT8 scale_mode
+Mask mask
+----
++
+SpiceCopy pixels from source_area in source_image to bounding_box using
+rop_descriptor instructions. In case scaling of source image is required it
+will be performed according to scale_mode and before the copying to the draw
+area. If mask is valid it will limit the modified area.
++
+.. SPICE_MSG_DISPLAY_DRAW_BLEND
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS source_image
+RECT source_area
+UINT16 rop_descriptor
+UINT8 scale_mode
+Mask mask
+----
++
+Mixing pixels from source_area in source_image with bounding_box pixels on the
+draw area using rop_descriptor instructions. In case scaling of source image is
+required it will be performed according to scale_mode and before the mixing
+with the draw area. If mask is valid it will limit the modified area.
++
+.. SPICE_MSG_DISPLAY_DRAW_BLACKNESS
++
+[source,c]
+----
+SpiceMsgDisplayBase
+Mask mask
+----
++
+SpiceFill bounding_box with black pixels. If mask is valid it will limit the
+modified area.
++
+.. SPICE_MSG_DISPLAY_DRAW_WHITENESS
++
+[source,c]
+----
+SpiceMsgDisplayBase
+Mask mask
+----
++
+SpiceFill bounding_box with white pixels. If mask is valid it will limit the
+modified area.
++
+.. SPICE_MSG_DISPLAY_DRAW_INVERS
++
+[source,c]
+----
+SpiceMsgDisplayBase
+Mask mask
+----
++
+Inverse all pixels in bounding_box. If mask is valid it will limit the modified
+area.
++
+.. SPICE_MSG_DISPLAY_DRAW_ROP3
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS source_image
+RECT source_area
+SpiceBrush brush
+UINT8 rop3
+UINT8 scale_mode
+Mask mask
+----
++
+Mix pixels from source_area in source_image, bounding_box pixels in the draw
+area, and the brush pattern. The method for mixing three pixels into the
+destination area (i.e., bounding_box) is defined by rop3 (i.e., ternary raster
+operations). In case scaling of source image is required it will be performed
+according to scale_mode and before the mixing. If mask is valid it will limit
+the modified area.
++
+.. SPICE_MSG_DISPLAY_DRAW_TRANSPARENT
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS source_image
+RECT source_area
+UINT32 transparent_color
+UINT32 transparent _true_color
+----
++
+SpiceCopy pixels from source_area on source_image to  bounding_box on the draw area.
+In case scaling of source image is required  it will use SPICE_IMAGE_SCALE_MODE_NEAREST.
+Pixels with value equal to the transparent color will be masked out.
+SpiceTransparent color is provided in two forms: true color (i.e., RGB888) and  the
+color in the original format (i.e., before compression) .
++
+.. SPICE_MSG_DISPLAY_DRAW_ALPHA_BLEND
++
+[source,c]
+----
+SpiceMsgDisplayBase
+UINT8 alpha
+SPICE_ADDRESS source_image
+RECT source_area
+----
++
+Alpha blend source_area of source_image on  bounding_box of draw area using
+alpha value or alternatively per pixel alpha value.  In case scaling of source
+image is required, it will use SPICE_IMAGE_SCALE_MODE_INTERPOLATE mode. Alpha value is
+defined as 0 is full transparency and 255 is full opacity. Format of source
+image can be pre-multiplied ARGB8888 for per pixel alpha value.
++
+New RGB color is defined as:
++
+[source,c]
+----
+color' =   (source_color *  alpha)  /  255
+alpha' =   (source_alpha *  alpha)  /  255
+new_color = color' + ((255 - alpha' ) * destination_color) / 255
+----
++
+.. SPICE_MSG_DISPLAY_DRAW_STROKE
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS path – address of the PathSegList that defines the path to render
+SpiceLineAttr attr
+Bush brush
+UINT16 fore_mode -  foreground rop_descriptor
+UINT16 back_mode – background rop_descriptor
+----
++
+Render path using brush line attribute and rop descriptors. If the line is
+styled (i.e., LINE_ATTR_FLAG_STYLED is set in attr.falgs) then background
+(i.e., inverse of the style) is drawn using back_mode and the foreground is
+drawn using fore_mode. If the line is not  styled, the entire path is rendered
+using fore_mode.
++
+.. SPICE_MSG_DISPLAY_DRAW_TEXT
++
+[source,c]
+----
+SpiceMsgDisplayBase
+SPICE_ADDRESS string – address of GlyphString
+RECT back_area
+SpiceBrush fore_brush
+SpiceBrush back_brush
+UINT16 fore_mode
+UINT16 back_mode
+----
++
+Render string of glyph on the display area using brush fore_brush and the
+rop_descriptor fore_mode. If back_area is not empty the renderer fill back_area
+on the display area prior to rendering the glyph string. back_area is  filled
+using back_brush and the rop_descriptor back_mode.
++
+. Video streaming commands
++
+Spice supports the creation of video streams by the server for rendering video
+content on the client display area.  Unlike other rendering commands, the
+stream data can  be compressed using lossy or video specific compression
+algorithms. It is not required to render video frames as they arrive and it is
+also allowed to drop video frames. This enables using video frames buffering
+for having smoother playback and audio synchronization. Audio  synchronization
+is achieved by  using time stamp that is attached to audio and video streams.
+By using video streaming the network traffic can be dramatically reduced. When
+the stream is created, the server sends create message using
+SPICE_MSG_DISPLAY_STREAM_CREATE. After the server creates a stream he can send data
+using SPICE_MSG_DISPLAY_STREAM_DATA, or set new stream clipping by sending clip
+message using SPICE_MSG_DISPLAY_STREAM_CLIP. Once the server no longer needs the
+stream, he can send destroy command using SPICE_MSG_DISPLAY_STREAM_DESTROY. The
+server can also destroy all active streams by sending destroy all message using
+SPICE_MSG_DISPLAY_STREAM_DESTROY_ALL.
++
+.. Stream flags
++
+[source,c]
+----
+STREAM_FLAG_TOP_DOWN = 1 /* stream frame line order is from top to bottom */
+----
++
+.. Codec types
++
+[source,c]
+----
+STREAM_CODEC_TYPE_MJPEG = 1 /* this stream uses motion JPEG  codec */
+----
++
+.. SPICE_MSG_DISPLAY_STREAM_CREATE,  SpiceMsgDisplayStreamCreate
++
+[cols="2*"]
+|===
+|UINT32 id
+|id of the new stream. It is the server's responsibility to manage stream ids
+
+|UINT32 flags
+|flags of the stream, any combination of STREAM_FLAG_?
+
+|UINT32 codec_type
+|type of codec used for this stream, one of STREAM_CODEC_TYPE_?
+
+|UINT64 reserved
+|must be zero
+
+|UINT32 stream_width
+|width of the source frame.
+
+|UINT32 stream_height
+|height of the source frame
+
+|UINT32 source_width
+|actual frame width to use, must be less or equal to  stream_width.
+
+|UINT32 source_height
+|actual frame height to use, must be less or equal to  stream_height.
+
+|RECT destination
+|area to render into on the client display area
+
+|SpiceClip clip
+|clipping of the stream
+|===
++
+.. SPICE_MSG_DISPLAY_STREAM_DATA, SpiceMsgDisplayStreamData
++
+[cols="2*"]
+|===
+|UINT32 id
+|stream id (i.e., SpiceMsgDisplayStreamCreate.id)
+
+|UINT32 multimedia_time
+|frame time stamp
+
+|UINT32 data_size
+|stream data size to consume in bytes
+
+|UINT32 pad_size
+|additional data padding in bytes
+
+|UINT8[] data
+|stream data depending on SpiceMsgDisplayStreamCreate.codec_type. Size of  data is (
+data_size +  pad_size)
+|===
++
+.. SPICE_MSG_DISPLAY_STREAM_CLIP, SpiceMsgDisplayStreamClip
++
+[cols="2*"]
+|===
+|UINT32 id
+|stream id (i.e., SpiceMsgDisplayStreamCreate.id)
+|===
++
+SpiceClip clip – new clipping of the stream
++
+.. SPICE_MSG_DISPLAY_STREAM_DESTROY, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|id of stream to destroy
+|===
++
+.. SPICE_MSG_DISPLAY_STREAM_DESTROY_ALL, VOID
++
+Destroy all active streams
++
+. Cache control
++
+.. Resource type
++
+[source,c]
+----
+SPICE_RES_TYPE_PIXMAP = 1
+----
++
+..  SpiceResourceID
++
+[cols="2*"]
+|===
+|UINT8 type
+|type of the resource, one of SPICE_RES_TYPE_?
+
+|UINT64 id
+|id of the resource
+|===
++
+.. SpiceResourceList
++
+[cols="2*"]
+|===
+|UINT16 count
+|number of items in resources
+
+|SpiceResourceID[] resources
+|list of  resources id
+|===
++
+.. SPICE_MSG_DISPLAY_INVAL_LIST, SpiceResourceList
++
+[cols="2*"]
+|===
+|SpiceResourceList
+|list of resources to remove from cache
+|===
++
+.. SPICE_MSG_DISPLAY_INVAL_ALL_PIXMAPS, SpiceMsgWaitForChannels
++
+Remove all images from the image cache. The client must use SpiceMsgWaitForChannels
+(for more info see <<channel_sync,Channel synchronization>>) to synchronize
+with other channels before clearing the cache.
++
+.. SPICE_MSG_DISPLAY_INVAL_PALETTE, UINT64
++
+[cols="2*"]
+|===
+|UINT64 id of palette
+|client needs to remove palette with that id from the cache
+|===
++
+.. SPICE_MSG_DISPLAY_INVAL_ALL_PALETTES, VOID
++
+Remove all palettes from palette cache
+
+== Cursor channel definition
+
+Spice protocol defines a set of messages for controlling cursor shape and
+position on the remote display area, cursor position messages are irrelevant
+for client mouse mode (see <<mouse_modes,Mouse Modes>>). Spice protocol also
+defines a set of messages for managing cursor shape cache on the client site.
+Client must strictly obey all such instructions. The server sends
+SPICE_MSG_CURSOR_INIT to set current pointer state (i.e., shape, position, visibility
+etc.) and to clear shape cache. After the server sends init message it can send
+any other cursor command except for SPICE_MSG_CURSOR_INIT. The server can send
+SPICE_MSG_CURSOR_RESET message - this will disable the cursor and reset the cursor
+cache. After this message the only valid message the server can send is
+SPICE_MSG_CURSOR_INIT. The relevant remote display area for a cursor channel is the
+one of the display channel that has the same channel id (i.e.,
+SpiceLinkMess.channel_id).
+
+. Server messages
++
+[source,c]
+----
+SPICE_MSG_CURSOR_INIT 		= 101
+SPICE_MSG_CURSOR_RESET		= 102
+SPICE_MSG_CURSOR_SET		= 103
+SPICE_MSG_CURSOR_MOVE		= 104
+SPICE_MSG_CURSOR_HIDE		= 105
+SPICE_MSG_CURSOR_TRAIL		= 106
+SPICE_MSG_CURSOR_INVAL_ONE	= 107
+SPICE_MSG_CURSOR_INVAL_ALL	= 108
+----
++
+.. Cursors types
++
+[source,c]
+----
+SPICE_CURSOR_TYPE_ALPHA 	= 0
+SPICE_CURSOR_TYPE_MONO 		= 1
+SPICE_CURSOR_TYPE_COLOR4 	= 2
+SPICE_CURSOR_TYPE_COLOR8 	= 3
+SPICE_CURSOR_TYPE_COLOR16 	= 4
+SPICE_CURSOR_TYPE_COLOR24 	= 5
+SPICE_CURSOR_TYPE_COLOR32 	= 6
+----
++
+.. SpiceCursorHeader
++
+[cols="2*"]
+|===
+|UINT64 unique
+|unique identifier of the corresponding cursor shape. It is used for storing
+and retrieving cursors from the cursor cache.
+
+|UINT16 type
+|type of the shape, one of CURSOR_TYPE_?
+
+|UINT16 width
+|width of the shape
+
+|UINT16 height
+|height of the shape
+
+|UINT16 hot_spot_x
+|position of hot spot on x axis
+
+|UINT16 hot_spot_y
+|position of hot spot on y axis
+|===
++
+.. Cursor flags
++
+[source,c]
+----
+CURSOR_FLAGS_NONE 		= 1
+----
++
+set when SpiceCursor (see below) is invalid
++
+[source,c]
+----
+CURSOR_CURSOR_FLAGS _CACHE_ME 	= 2
+----
++
+set when the client should add this shape to the shapes cache. The client will
+use SpiceCursorHeader.unique as cache key.
++
+[source,c]
+----
+CURSOR_FLAGS_FROM_CACHE 	= 4
+----
++
+set when the client should retrieve the cursor shape, using SpiceCursorHeader.unique
+as key, from the shapes cache. In this case all fields of SpiceCursorHeader except
+for 'unique' are invalid.
++
+.. SpiceCursor
++
+[cols="2*"]
+|===
+|UINT32 flags
+|any valid combination of  SPICE_CURSOR_FLAGS_?
+
+|SpiceCursorHeader header
+|
+
+|UINT8[] data
+|actual cursor shape data, the size is determine by width, height and type from
+SpiceCursorHeader. Next we will describe in detail the  shape data format according
+to cursor type:
+
+|ALPHA, alpha shape
+|data contains pre-multiplied ARGB8888 pixmap. Line stride is <width * 4>.
+
+|MONO, monochrome shape
+|data contains two bitmaps with size  <width> * <height>. The first bitmap is
+AND mask and the second is XOR mask.  Line stride is ALIGN(<width>, 8) / 8.
+Bits order within every byte is big endian.
+
+|COLOR4, 4 bits per pixel shape
+|First data region is pixmap: the stride of the pixmap is ALIGN(width , 2) / 2;
+every nibble is translated to a color usingthe color palette; Nibble order is
+big endian. Second data region contain 16 colors palette: each entry is 32 bit
+RGB color. Third region is a bitmap mask:  line stride is ALIGN(<width>, 8) /
+8; bits order within every byte is big endian.
+
+|COLOR4, 8 bits per pixel shape
+|First data region is pixmap: the stride of the pixmap is <width>; every byte
+is translated to color using the color palette. Second data region contain 256
+colors palette: each entry is 32 bit RGB color. Third region is a bitmap mask:
+line stride is ALIGN(<width>, 8) / 8; bits order within every byte is big
+endian.
+
+|COLOR16, 16 bits per pixel shape
+|First data region is pixmap: the stride of the pixmap is <width * 2>; every
+UINT16 is RGB_555. Second region is a bitmap mask: line stride is
+ALIGN(<width>, 8) / 8; bits order within every byte is big endian.
+
+|COLOR24, 24 bits per pixel shape
+|First data region is pixmap: the stride of the pixmap is <width * 3>; every
+UINT8[3] is RGB_888. Second region is a bitmap mask: line stride is
+ALIGN(<width>, 8) / 8; bits order within every byte is big endian.
+
+|COLOR32, 32 bits per pixel shape
+|First data region is pixmap: the stride of the pixmap is <width * 4>,;every
+UINT32 is RGB_888. Second region is a bitmap mask: line stride is
+ALIGN(<width>, 8) / 8; bits order within every byte is big endian.
+|===
++
+For more deatails on drawing the cursor shape see <<cursor_shape, this
+section>>
++
+.. SPICE_MSG_CURSOR_INIT, SpiceMsgCursorInit
++
+[cols="2*"]
+|===
+|POINT16 position
+|position of mouse pointer on the relevant display area. Not relevant  in
+client mode.
+
+|UINT16 trail_length
+|number of cursors in the trail excluding main cursor.
+
+|UINT16 trail_frequency
+|millisecond interval between trail updates.
+
+|UIN8 visible
+|if 1, the cursor is visible. If 0, the cursor is invisible.
+
+|SpiceCursor cursor
+|current cursor shape
+|===
++
+.. SPICE_MSG_CURSOR_RESET, VOID
++
+.. SPICE_MSG_CURSOR_SET, SpiceMsgCursorSet
++
+[cols="2*"]
+|===
+|POINT16 position
+|position of mouse pointer on the relevant display area. not relevant in client
+mode.
+
+|UINT8 visible
+|if 1, the cursor is visible. If 0, the cursor is invisible.
+
+|SpiceCursor cursor
+|current cursor shape
+|===
++
+.. SPICE_MSG_CURSOR_MOVE, POINT16
++
+[cols="2*"]
+|===
+|POINT16
+|new mouse position. Not relevant in client mode. This message also implicitly
+sets cursor visibility to 1.
+|===
++
+.. SPICE_MSG_CURSOR_HIDE, VOID
++
+Hide pointer on the relevant display area.
++
+.. SPICE_MSG_CURSOR_TRAIL
++
+[cols="2*"]
+|===
+|UINT16 length
+|number of cursors in the trail excluding main cursor.
+
+|UINT16 frequency
+|millisecond interval between trail updates
+|===
++
+.. SPICE_MSG_CURSOR_INVAL_ONE, UINT64
++
+[cols="2*"]
+|===
+|UINT64
+|id of cursor shape to remove from the cursor cache
+|===
++
+.. SPICE_MSG_CURSOR_INVAL_ALL, VOLD
++
+Clear cursor cache
++
+[[cursor_shape]]
+. Drawing the cursor shape according to the cursor type
++
+This section is relevant only for server mouse mode. Cursor shape positioning
+on the display area is done by placing cursor hot spot on the current cursor
+position.
++
+.. Alpha - no spacial handling, just bland the shape on the display area.
++
+.. Monochrome
++
+For each cleared bit in the AND mask clear the corresponding bits in the
+relevant pixel on the display area
+For each set bit in the XOR mask reverse the
+corresponding bits in the relevant pixel on the display area
++
+.. Color
++
+If the source color is black and mask bit is set,  NOP.
+Else, if the source color is white and the mask bit is set, reverse all bits in
+the relevant pixel on the display area.
+Else, put source color.
+
+== Playback channel definition
+
+Spice supports sending audio streams for playback on the client side. An audio
+stream is sent by the server in an audio packet using SPICE_MSG_PLAYBACK_DATA
+message. The content of the audio packet is controlled by the playback mode
+that the server sends using SPICE_MSG_PLAYBACK_MODE message. The server can start and
+stop the stream using SPICE_MSG_PLAYBACK_START and SPICE_MSG_PLAYBACK_STOP messages.
+Sending audio packet is allowed only between  start and stop messages. Sending
+start message is allowed only in stop state and after at least one mode message
+was sent. Sending a stop message is allowed only during a start state.
+
+. Server messages
++
+[source,c]
+----
+SPICE_MSG_PLAYBACK_DATA 		= 101
+SPICE_MSG_PLAYBACK_MODE 		= 102
+SPICE_MSG_PLAYBACK_START		= 103
+SPICE_MSG_PLAYBACK_STOP			= 104
+----
++
+. Audio format
++
+[source,c]
+----
+SPICE_AUDIO_FMT_S16 			= 1 /* each channel sample is a 16 bit
+signed integer */
+----
++
+. Playback data mode
++
+Two types of data mode are available: (1) raw PCM data, (2) compressed data
+in CELT 0_5_1 format (obsolete) and (3) compressed data in OPUS format.
++
+[source,c]
+----
+SPICE_AUDIO_DATA_MODE_RAW 		= 1
+SPICE_AUDIO_DATA_MODE_CELT_0_5_1	= 2
+SPICE_AUDIO_DATA_MODE_OPUS		= 3
+----
++
+. Playback channel capabilities
++
+[source,c]
+----
+SPICE_PLAYBACK_CAP_CELT_0_5_1 		= 0
+SPICE_PLAYBACK_CAP_VOLUME		= 1
+SPICE_PLAYBACK_CAP_LATENCY		= 2
+SPICE_PLAYBACK_CAP_OPUS			= 3
+----
++
+Spice client needs to declare support of OPUS in channel capabilities in
+order to allow the server to send playback packets in OPUS format.
++
+. SPICE_MSG_PLAYBACK_MODE, SpiceMsgPlaybackMode
++
+[cols="2*"]
+|===
+|UINT32 time
+|server time stamp
+
+|UINT32 mode
+|one of SPICE_AUDIO_DATA_MODE_?
+
+|UINT8[] data
+|specific data, content depend on mode
+|===
++
+. SPICE_MSG_PLAYBACK_START, SpiceMsgRecordStart
++
+[cols="2*"]
+|===
+|UINT32 channels
+|number of audio channels
+
+|UINT32 format
+|one of SPICE_AUDIO_FMT_?
+
+|UINT32 frequency
+|channel samples per second
+|===
++
+. SPICE_MSG_PLAYBACK_DATA, SpiceMsgPlaybackPacket
++
+[cols="2*"]
+|===
+|UINT32 time
+|server time stamp
+
+|UINT8[] data
+|playback data , content depend on mode
+|===
++
+. SPICE_MSG_PLAYBACK_STOP, VOID
++
+Stop current audio playback
+
+== Record Channel definition
+
+Spice supports transmitting of audio captured streams from the client to the
+server. Spice server starts audio capturing using SPICE_MSG_RECORD_START message.
+This message instructs the client to start transmitting captured audio . In
+response, the client sends time stamp of the stream start using
+SPICE_MSGC_RECORD_START_MARK. After the client sends start mark it can start
+transmitting audio stream data using SPICE_MSGC_RECORD_DATA. One mode message must be
+sent by the client before any other message using SPICE_MSGC_RECORD_MODE. This, in
+order to inform the server on what type of data will be transferred. Mode
+message can also be transmitted at any other time in order to switch the data
+type delivered by SPICE_MSGC_RECORD_DATA. The Server can send SPICE_MSG_RECORD_STOP for
+stopping captured audio streaming. Sending a start message is allowed only
+while the stream is in stop state. Sending a stop message and data messages is
+allowed only while the stream is in start state. Sending mark message is
+allowed only between start message and the first data message.
+
+. Server messages
++
+[source,c]
+----
+SPICE_MSG_RECORD_START 			= 101
+SPICE_MSG_RECORD_STOP			= 102
+----
++
+. Client messages
++
+[source,c]
+----
+SPICE_MSGC_RECORD_DATA 			= 101
+SPICE_MSGC_RECORD_MODE			= 102
+SPICE_MSGC_RECORD_START_MARK		= 103
+----
++
+. Audio format
++
+[source,c]
+----
+SPICE_AUDIO_FMT_S16 			= 1 /* each channel sample is a 16 bit signed integer */
+----
++
+. Record data mode
++
+Two types of data mode are available: (1) raw PCM data (2) compressed data   in
+CELT 0.5.1 format (obsolete) (3) compressed data in OPUS format.
++
+[source,c]
+----
+SPICE_AUDIO_DATA_MODE_RAW 		= 1
+SPICE_AUDIO_DATA_MODE_CELT_0_5_1	= 2
+SPICE_AUDIO_DATA_MODE_OPUS		= 3
+----
++
+. Record channel capabilities
++
+[source,c]
+----
+SPICE_RECORD_CAP_CELT_0_5_1		= 0
+SPICE_RECORD_CAP_VOLUME			= 1
+SPICE_RECORD_CAP_OPUS			= 2
+----
++
+Spice server needs to declare support of OPUS in channel capabilities in
+order to allow the client to send recorded packets in OPUS format.
++
+. SPICE_MSGC_RECORD_MODE, SpiceMsgcRecordMode
++
+[cols="2*"]
+|===
+|UINT32 time
+|client time stamp
+
+|UINT32 mode
+|one of SPICE_AUDIO_DATA_MODE_?
+
+|UINT8[] data
+|specific data, content depend on mode
+|===
++
+. SPICE_MSG_RECORD_START, SpiceMsgRecordStart
++
+[cols="2*"]
+|===
+|UINT32 channel
+|number of audio channels
+
+|UINT32 format
+|one of SPICE_AUDIO_FMT_?
+
+|UINT32 frequency
+|channel samples per second
+|===
++
+. SPICE_MSGC_RECORD_START_MARK, UINT32
++
+[cols="2*"]
+|===
+|UINT32
+|client time stamp of stream start
+|===
++
+. SPICE_MSGC_RECORD_DATA, SpiceMsgcRecordPacket
++
+[cols="2*"]
+|===
+|UINT32 time
+|client time stamp
+
+|UINT8[] data
+|recorded data , content depend on mode
+|===
++
+. SPICE_MSG_RECORD_STOP, VOID
++
+Stop current audio capture

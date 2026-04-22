@@ -1,0 +1,160 @@
+{
+	px_proxy_factory_get_proxies
+	Memcheck:Leak
+	fun:malloc
+	fun:tls_get_addr_tail
+	...
+	fun:px_proxy_factory_get_proxies
+}
+
+{
+	px_proxy_factory_get_proxies2
+	Memcheck:Leak
+	fun:malloc
+	...
+	fun:__tls_get_addr
+	...
+	fun:px_proxy_factory_get_proxies
+}
+
+{
+	gnutls_tls_rnd_leak
+	Memcheck:Leak
+	fun:malloc
+	...
+	fun:__tls_get_addr
+	...
+	fun:gnutls_rnd
+}
+
+{
+	gnutls_tls_p11_kit_leak
+	Memcheck:Leak
+	fun:malloc
+	...
+	fun:__tls_get_addr
+	...
+	fun:p11_kit_modules_load
+}
+
+{
+	gnutls_x509_ext_import_subject_alt_names
+	Memcheck:Cond
+	...
+	fun:gnutls_x509_ext_import_subject_alt_names
+	...
+	fun:gnutls_x509_crt_import
+	fun:gnutls_x509_trust_list_iter_get_ca
+}
+
+{
+	glib_g_socket_client_class_init
+	Memcheck:Leak
+	fun:calloc
+	...
+	fun:type_class_init_Wm
+	...
+	fun:g_socket_client_class_init
+}
+
+# One-time getaddrinfo() configuration loading
+{
+	g-threaded-resolver-getaddrinfo-config2
+	Memcheck:Leak
+	match-leak-kinds:reachable,definite
+	fun:malloc
+	...
+	fun:__resolv_conf_allocate
+	...
+	fun:getaddrinfo
+	fun:do_lookup_by_name
+}
+
+# g_type_create_instance Valgrind malloc annotation, for
+# some reason this has issues with Fedora 31 from test-listen test
+{
+	g_type_create_instance-valgrind
+	Memcheck:Leak
+	fun:g_type_create_instance
+	...
+	fun:g_socket_client_connect
+	fun:fake_client_connect_tls
+}
+
+# suppressing several new "possible" loss coming with Fedora 33 on calloc
+{
+    # this one is making most tests to fail (20 out of 21)
+    calloc-possibly-lost-from-dl_init
+    Memcheck:Leak
+    match-leak-kinds:possible
+    fun:calloc
+    fun:g_malloc0
+    ...
+    fun:_dl_init
+}
+
+{
+    calloc-possibly-lost-from-fake_client_connect-fake_client_new
+    Memcheck:Leak
+    match-leak-kinds:possible
+    fun:calloc
+    fun:g_malloc0
+    ...
+    fun:g_object_new
+    fun:fake_client_*
+}
+
+{
+    calloc-possibly-lost-from-g_output_stream
+    Memcheck:Leak
+    match-leak-kinds:possible
+    fun:calloc
+    ...
+    fun:g_thread_pool_push
+    fun:g_task_run_in_thread
+    ...
+    fun:g_output_stream_write_all
+}
+
+{
+    calloc-possibly-lost-from-g_thread_new
+    Memcheck:Leak
+    match-leak-kinds:possible
+    fun:calloc
+    ...
+    fun:g_thread_new
+}
+
+{
+    g_thread_pool_leak
+    Memcheck:Leak
+    match-leak-kinds:possible
+    fun:calloc
+    ...
+    fun:g_thread_new_internal
+    ...
+    fun:g_thread_pool_push
+}
+
+{
+    g_tls_client_connection_new
+    Memcheck:Leak
+    match-leak-kinds:possible,definite
+    fun:malloc
+    ...
+    fun:_dl_close
+    ...
+    fun:g_tls_client_connection_new
+}
+
+{
+    fedora_38_pthread_leak
+    Memcheck:Leak
+    match-leak-kinds: possible
+    fun:calloc
+    ...
+    fun:allocate_dtv
+    fun:_dl_allocate_tls
+    ...
+    fun:pthread_create@@GLIBC_2.34
+}

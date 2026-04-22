@@ -1,0 +1,465 @@
+Spice project coding style and coding conventions
+=================================================
+
+Copyright (C) 2009-2018 Red Hat, Inc.
+Licensed under a Creative Commons Attribution-Share Alike 3.0
+United States License (see http://creativecommons.org/licenses/by-sa/3.0/us/legalcode).
+
+
+Source Files
+------------
+
+Names
+~~~~~
+
+Use lower case and separate words using dashes (e.g., file-name.c, header.h).
+
+Use standard file extension for C source and header files.
+
+Line width
+~~~~~~~~~~
+
+No more than 100 characters on a single line
+
+Tabs
+~~~~
+
+Tabs are not allowed, use 4 spaces instead
+
+White spaces
+~~~~~~~~~~~~
+
+Trailing white spaces are not allowed
+
+New Line
+~~~~~~~~
+
+Use Unix style line ending (i.e., LF)
+
+New line (i.e., EOL) must be the last char in the file
+
+Comparing
+---------
+
+Use  right-hand comparison style.
+
+Examples: +
+  use `(var == 7)` instead of  `(7 == var)` +
+  use `(function(var) > 7)` instead of `(7 < function(var))`
+
+boolean type
+------------
+Where possible prefer the usage of `bool` type to store boolean.
+
+If not technically possible (ie libJPEG uses `boolean` while GLib uses `gboolean`) uses proper library type.
+
+Constants should be consistent with the type used so `true` and `false` for `bool` type.
+
+true, false and NULL
+--------------------
+
+Use `true`, `false` and `NULL` instead of 1 and 0 in order to improve code readability.
+
+Static storage initialization
+-----------------------------
+
+To improve code readability, explicitly initialize variables that depend on default initialization with zero/null.
+
+FIXME and TODO
+--------------
+
+Comments that are prefixed with `FIXME` describe a bug that need to be fixed. Generally, it is not allowed to commit new code having `FIXME` comment. Committing  `FIXME` is allowed only for existing bugs. Comments that are prefixed with `TODO` describe further features, optimization or code improvements, and they are allowed to be committed along with the relevant code.
+
+ASSERT
+------
+
+Use it freely. ASSERT helps testing function arguments and function results validity.  ASSERT helps detecting bugs and improve code readability and stability.
+
+sizeof
+------
+
+Apply function style to `sizeof` (i.e., use `sizeof(x)`)
+
+const
+-----
+
+Use const keyword when applicable to improve code reliability and celerity.
+
+goto
+----
+
+Using goto is allowed in C code for error handling. In any other case it will be used only as a special exception.
+
+switch
+------
+
+If a switch case falls through (i.e. does not end with a `break`), annotate it with a `/* fall through */` comment. Some compilers will emit a warning otherwise.
+
+Defining Constant values
+------------------------
+
+Use defines for constant values for improving readability and ease of changes. Alternatively, use global `const` variables.
+
+Short functions
+---------------
+
+Try to split code to short functions, each having simple functionality, in order to improve code readability and re-usability. Prefix with inline short functions or functions that were splitted for readability reason.
+
+Return on if
+------------
+
+Try to return immediately on if in places that can reduce indentation level.
+
+Example:
+
+prefer
+[source,c]
+----
+void function(int *n)
+{
+    if (!n) {
+        return;
+    }
+    ...
+}
+----
+over
+
+[source,c]
+----
+void function(int *n)
+{
+    if (!n) {
+        return;
+    } else {
+        ...
+    }
+}
+----
+
+Names
+-----
+
+* Don't underestimate the importance of name choosing. Good names make the code more easy to understand and reduce the required level of code documentation. When choosing names, prefer long meaningful names over short vague name.
+* Variable and Function names - use lower case and separate words using underscore (e.g., sample_variable_name)
+* Structures, class and enum names - one or more words, each word start with upper case (e.g., Name, SampleStructName)
+* Defines and enum items names - uppercase words separated using underscores (e.g., NAME, SAMPLE_DEFINE_NAME)
+
+Type prefix
+~~~~~~~~~~~
+In the code there are some common prefixes for types, `Red` and `Spice`.
+As a basic rule `Spice` refers to types in the public external headers while `Red` is used for internal types.
+
+Common abbreviations
+~~~~~~~~~~~~~~~~~~~~
+`ccc` CursorChannelClient
+
+`dc`  DisplayChannel
+
+`dcc` DisplayChannelClient
+
+`dpi` drawable pipe item
+
+`rcc` RedChannelClient
+
+`sif` spice interface
+
+`sin` spice instance
+
+Optimization
+------------
+
+Keep optimization to fast path code. Prefer safe, clear and easy to maintain coding for code that is not on the fast path.
+
+Spacing
+-------
+
+Use spacing for improving code readability.
+
+[source,c]
+for (i = 0; i < 10; ++i) {
+    some_func(var, i * i + *ptr, &var, sizeof(var));
+}
+
+Indentation
+-----------
+
+[[function_indentation]]
+Function Indentation
+~~~~~~~~~~~~~~~~~~~~
+
+* No spaces between function name to left bracket.
+* Curly bracket start on new line.
+* Functions must be padded with empty lines on both sides
++
+[source,c]
+void function(type1 arg1, type2 arg2, type2 arg3)
+{
+  ...
+}
++
+* In case of a new line in arguments list, align it to the first argument type.
++
+[source,c]
+----
+void function(type1 arg1,
+              type2 arg2,
+              type3 arg3)
+----
++
+Or
++
+[source,c]
+----
+void function(type1 arg1, type2 arg2,
+              type3 arg3)
+----
++
+* New line is acceptable in arguments list and before function name, like
++
+[source,c]
+----
+void
+function(type1 arg1, type2 arg2,
+         type3 arg3)
+----
+
+Branching indentation
+~~~~~~~~~~~~~~~~~~~~~
+
+* Add space after a branch keyword and after the right bracket.
+* Curly bracket starts on the same line the branch starts.
+* Place curly brackets after all control flow constructs even where optional. This convention reduces branching bugs that are difficult to detect. It also makes it easier to add logging messages during debugging  since it eliminates the need to add the brackets.
++
+[source,c]
+----
+if (condition) {
+    ...
+} else if (condition) {
+    ...
+} else {
+    ...
+}
+----
++
+In case of long condition statement, prefer having additional temporary variable over multiple line condition statement.
++
+In case of new line in condition statement.
++
+[source,c]
+----
+if (long_name && very_long_name && very_long ||
+                                               var_name) {
+----
++
+or indent under the round bracket using spaces
++
+[source,c]
+----
+if (long_name && very_long_name && long_name ||
+    var_name) {
+----
++
+Break function arguments list in long condition statement according to <<function_indentation, Function Indentation>> section.
++
+[source,c]
+----
+while (condition) {
+        ...
+}
+
+do {
+    ...
+} while (condition);
+
+for (i = x; i < y; i++) {
+    ...
+}
+
+
+switch (x) {
+case A: {
+    ...
+    break;
+}
+case B:
+    ...
+    ...
+    break;
+default:
+    ...
+}
+----
+
+Types indentation
+~~~~~~~~~~~~~~~~~
+
+[source,c]
+----
+struct StructName {
+    type1 name1;
+    type2 name2;
+
+    ...
+};
+
+enum {
+    A,
+    B,
+    C = 10,
+    D,
+};
+
+union {
+    type1 name1;
+    type2 name2;
+    ...
+} u;
+----
+
+Vertical indentation
+~~~~~~~~~~~~~~~~~~~~
+
+Use one space no tabs and no vertical alignment.
+[source,c]
+----
+long var_name_1 = 7;
+int var_name_2 = 1111l;
+unsigned long long_var_name_1 = 666;
+char long_var_name_1 = 'a';
+
+void f1(int a, char ch);
+unsigned long f2(int a, char ch);
+----
+
+Multi line macro indentation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[source,c]
+#define MACRO_NAME(a, b, c) {   \
+    int ab = a + c;             \
+    int ac = a + b;             \
+    int bc = b + c;             \
+    f(ab, ac, bc);              \
+}
+
+Multi line array indentation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[source,c]
+char *array[] = {
+    "item_1",
+    "item_2",
+    "item_3",
+};
+
+Headers
+-------
+
+Headers should be protected against multiple inclusion using a macro that contains the header file name in uppercase, with all characters that are invalid in C replaced with an underscore '_':
+
+[source,c]
+----
+#ifndef MY_MODULE_H
+#define MY_MODULE_H
+
+...
+
+#endif // MY_MODULE_H
+----
+
+The macro may include additional information, e.g. a component. For example a file generally referenced as foo/bar.h could use a FOO_BAR_H macro.
+
+Historically, some headers added underscores liberally, e.g. MY_MODULE_H_. This is neither necessary nor discouraged, although as a reminder, a leading underscore followed by a capital letter is reserved for the implementation and should not be used, so _MY_MODULE_H is, technically speaking, invalid C.
+
+Alternatively (recommended on newer code) you can use the `pragma once` directive, as:
+
+[source,c]
+----
+#pragma once
+
+...
+----
+
+Header inclusion
+----------------
+
+Headers should be included in this order
+
+[source,c]
+----
+#include <system_headers.h>
+#include <no_spice_no_system_libraries.h>
+#include <spice_protocol.h>
+#include <spice_common.h>
+
+#include "spice_server.h"
+----
+
+(note the empty line between no spice-server and spice-server headers)
+
+Also in source (no header) files you must include `config.h` at the beginning so should start (beside comments and copyright) with
+
+[source,c]
+----
+#include <config.h>
+
+#include <system_headers.h>
+#include <no_spice_no_system_libraries.h>
+#include <spice_protocol.h>
+#include <spice_common.h>
+
+#include "spice_server.h"
+----
+
+C++
+---
+C\++ style follows C style if not specified otherwise.
+The C+\+11 dialect is assumed by default. No attempts will be made to
+restrict the code to older variants of C+\+.
+For compatibility reasons don't use more recent C++ dialects.
+
+Method names
+~~~~~~~~~~~~
+
+Method names should use lower case and separate words with
+underscores.
+
+
+Namespaces
+~~~~~~~~~~
+
+Namespaces should use lower case and separate words with underscores.
+Namespace blocks should not increase indentation.
+Namespaces can be nested. Namespace closing brackets for nested
+namespaces can be placed together on the same line, but for
+readability reasons the closure should specify the namespace with a
+comment.
+
+[source,cpp]
+----
+namespace spice {
+namespace streaming_agent {
+
+class ClassInsideNamespace {
+...
+};
+
+}} // namespace spice::streaming_agent
+----
+
+The `using namespace` construct should never be used in headers. It should
+be used sparingly in source files, and only within the body of short
+functions.
+
+Preferred alternatives to `using namespace` include:
+
+* using declarations
++
+[source,cpp]
+using spice::streaming_agent::some_class;
++
+* namespace aliases
++
+[source,cpp]
+namespace ssa = spice::streaming_agent;

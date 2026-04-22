@@ -1,0 +1,96 @@
+option('gtk',
+    type : 'feature',
+    description: 'Enable gtk+')
+
+option('wayland-protocols',
+    type : 'feature',
+    description: 'Enable wayland protocols')
+
+option('webdav',
+    type : 'feature',
+    description: 'Enable webdav support')
+
+option('builtin-mjpeg',
+    type : 'boolean',
+    value : true,
+    description : 'Enable the builtin mjpeg video decoder')
+
+option('usbredir',
+    type : 'feature',
+    description : 'Enable usbredir support')
+
+option('libcap-ng',
+       type : 'feature',
+       description: 'Enable libcap-ng support for the USB acl helper')
+
+option('polkit',
+    type : 'feature',
+    description : 'Enable PolicyKit support for the USB acl helper')
+
+option('pie',
+    type : 'boolean',
+    value : true,
+    description : 'Enable position-independent-executable support for the USB acl helper')
+
+option('usb-acl-helper-dir',
+    type : 'string',
+    value : '',
+    description : 'Directory where the USB ACL helper binary should be installed')
+
+option('usb-ids-path',
+    type : 'string',
+    value : '',
+    description : 'Specify the path to usb.ids')
+
+option('coroutine',
+    type : 'combo',
+    value : 'auto',
+    choices : ['auto', 'ucontext', 'libucontext', 'gthread', 'winfiber'],
+    description : 'Use ucontext or GThread for coroutines')
+
+option('introspection',
+    type : 'feature',
+    description: 'Check for GObject instrospection requirements')
+
+option('vapi',
+    type : 'feature',
+    description: 'Check for vala requirements')
+
+option('alignment-checks',
+    type : 'boolean',
+    value : false,
+    description : 'Enable runtime checks for cast alignment')
+
+option('lz4',
+    type : 'feature',
+    description: 'Enable lz4 compression support')
+
+option('sasl',
+    type : 'feature',
+    description : 'Use cyrus SASL authentication')
+
+option('opus',
+    type : 'feature',
+    description: 'Enable Opus audio codec')
+
+option('smartcard',
+    type : 'feature',
+    description : 'Enable smartcard support')
+
+option('egl',
+    type : 'feature',
+    description: 'EGL support')
+
+option('gtk_doc',
+       type : 'feature',
+       description : 'Generate API documentation with gtk-doc')
+
+option('recorder',
+    type : 'boolean',
+    value : false,
+    description: 'Enable recorder instrumentation')
+
+option('valgrind',
+    type : 'boolean',
+    value : false,
+    description : 'Enable Valgrind support')

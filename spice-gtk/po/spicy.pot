@@ -1,0 +1,551 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-11-17 14:53+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../src/channel-main.c:1937
+msgid "The spice agent cancelled the file transfer"
+msgstr ""
+
+#: ../src/channel-main.c:1948
+msgid "Invalid filename of transferred file"
+msgstr ""
+
+#: ../src/channel-main.c:1957
+msgid "The spice agent reported an error during the file transfer"
+msgstr ""
+
+#: ../src/channel-main.c:1969
+msgid "File transfer failed due to lack of free space on remote machine"
+msgstr ""
+
+#: ../src/channel-main.c:1976
+#, c-format
+msgid ""
+"File transfer failed due to lack of free space on remote machine (%s free, "
+"%s to transfer)"
+msgstr ""
+
+#: ../src/channel-main.c:1984
+msgid ""
+"User's session is locked and cannot transfer files, unlock it and try again."
+msgstr ""
+
+#: ../src/channel-main.c:1989
+msgid "Session agent not connected."
+msgstr ""
+
+#: ../src/channel-main.c:1993
+msgid "File transfer is disabled."
+msgstr ""
+
+#: ../src/channel-main.c:3488
+msgid "The file transfer is disabled"
+msgstr ""
+
+#: ../src/desktop-integration.c:98
+msgid "Automounting has been inhibited for USB auto-redirecting"
+msgstr ""
+
+#: ../src/spice-channel.c:1184
+msgid "Authentication failed"
+msgstr ""
+
+#: ../src/spice-channel.c:1202
+msgid "Authentication failed: password is too long"
+msgstr ""
+
+#: ../src/spice-channel.c:1207
+msgid "Authentication failed: wrong password?"
+msgstr ""
+
+#: ../src/spice-option.c:60
+msgid "--spice-color-depth is deprecated. Use guest's display settings instead"
+msgstr ""
+
+#: ../src/spice-option.c:80
+#, c-format
+msgid ""
+"invalid effect name (%s), must be 'wallpaper', 'font-smooth', 'animation' or "
+"'all'"
+msgstr ""
+
+#: ../src/spice-option.c:104
+#, c-format
+msgid "invalid channel name (%s), valid names: all, %s"
+msgstr ""
+
+#: ../src/spice-option.c:140
+#, c-format
+msgid "Image compression algorithm %s not supported"
+msgstr ""
+
+#: ../src/spice-option.c:162
+msgid "Force the specified channels to be secured"
+msgstr ""
+
+#: ../src/spice-option.c:164
+msgid "Disable guest display effects"
+msgstr ""
+
+#: ../src/spice-option.c:167
+msgid "Guest display color depth (deprecated)"
+msgstr ""
+
+#: ../src/spice-option.c:169
+msgid "Truststore file for secure connections"
+msgstr ""
+
+#: ../src/spice-option.c:169
+msgid "<file>"
+msgstr ""
+
+#: ../src/spice-option.c:171
+msgid "Subject of the host certificate (field=value pairs separated by commas)"
+msgstr ""
+
+#: ../src/spice-option.c:171
+msgid "<host-subject>"
+msgstr ""
+
+#: ../src/spice-option.c:173
+msgid "Disable audio support"
+msgstr ""
+
+#: ../src/spice-option.c:175
+msgid "Enable smartcard support"
+msgstr ""
+
+#: ../src/spice-option.c:177
+msgid ""
+"Certificates to use for software smartcards (field=values separated by "
+"commas)"
+msgstr ""
+
+#: ../src/spice-option.c:177
+msgid "<certificates>"
+msgstr ""
+
+#: ../src/spice-option.c:179
+msgid ""
+"Path to the local certificate database to use for software smartcard "
+"certificates"
+msgstr ""
+
+#: ../src/spice-option.c:179
+msgid "<certificate-db>"
+msgstr ""
+
+#: ../src/spice-option.c:181
+msgid "Disable USB redirection support"
+msgstr ""
+
+#: ../src/spice-option.c:183
+msgid "Filter selecting USB devices to be auto-redirected when plugged in"
+msgstr ""
+
+#: ../src/spice-option.c:183 ../src/spice-option.c:185
+msgid "<filter-string>"
+msgstr ""
+
+#: ../src/spice-option.c:185
+msgid "Filter selecting USB devices to redirect on connect"
+msgstr ""
+
+#: ../src/spice-option.c:187
+msgid "Name of ISO file or CD/DVD device to share"
+msgstr ""
+
+#: ../src/spice-option.c:187
+msgid "<filename> (repeat allowed)"
+msgstr ""
+
+#: ../src/spice-option.c:189
+msgid "Image cache size (deprecated)"
+msgstr ""
+
+#: ../src/spice-option.c:189 ../src/spice-option.c:191
+msgid "<bytes>"
+msgstr ""
+
+#: ../src/spice-option.c:191
+msgid "Glz compression history size (deprecated)"
+msgstr ""
+
+#: ../src/spice-option.c:193
+msgid "Shared directory"
+msgstr ""
+
+#: ../src/spice-option.c:193
+msgid "<dir>"
+msgstr ""
+
+#: ../src/spice-option.c:195
+msgid "Preferred image compression algorithm"
+msgstr ""
+
+#: ../src/spice-option.c:203
+msgid "Enable Spice-GTK debugging"
+msgstr ""
+
+#: ../src/spice-option.c:205
+msgid "Display Spice-GTK version information"
+msgstr ""
+
+#: ../src/spice-option.c:210
+msgid "Spice Options:"
+msgstr ""
+
+#: ../src/spice-option.c:210
+msgid "Show Spice Options"
+msgstr ""
+
+#: ../src/usb-device-manager.c:232 ../src/usb-device-manager.c:1428
+#: ../src/usb-device-manager.c:1492 ../src/usb-device-manager.c:1554
+msgid "USB redirection support not compiled in"
+msgstr ""
+
+#: ../src/usb-device-manager.c:1136
+msgid "No free USB channel"
+msgstr ""
+
+#: ../src/usb-device-manager.c:1374
+msgid "USB redirection is disabled"
+msgstr ""
+
+#: ../src/usb-device-manager.c:1380
+msgid "The connected VM is not configured for USB redirection"
+msgstr ""
+
+#: ../src/usb-device-manager.c:1403
+msgid "Some USB devices are blocked by host policy"
+msgstr ""
+
+#: ../src/usb-device-manager.c:1421
+msgid "There are no free USB channels"
+msgstr ""
+
+#: ../src/usb-device-manager.c:1545
+msgid "libusb backend is null"
+msgstr ""
+
+#: ../src/usb-device-widget.c:208
+msgid "Select ISO file or device"
+msgstr ""
+
+#: ../src/usb-device-widget.c:211
+msgid "_Cancel"
+msgstr ""
+
+#: ../src/usb-device-widget.c:212
+msgid "_Open"
+msgstr ""
+
+#: ../src/usb-device-widget.c:224
+#, c-format
+msgid "shared CD %s, %s"
+msgstr ""
+
+#: ../src/usb-device-widget.c:243
+msgid "SPICE CD (empty)"
+msgstr ""
+
+#: ../src/usb-device-widget.c:270
+msgid "Select USB devices to redirect"
+msgstr ""
+
+#: ../src/usb-device-widget.c:450
+#, c-format
+msgid "Can't redirect: %s"
+msgstr ""
+
+#: ../src/usb-device-widget.c:489
+msgid "Redirecting USB Device..."
+msgstr ""
+
+#: ../src/usb-device-widget.c:497
+msgid "No USB devices detected"
+msgstr ""
+
+#: ../src/usbutil.c:265
+msgid "USB"
+msgstr ""
+
+#: ../src/usbutil.c:267
+msgid "Device"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:36
+msgid "Spice server uri"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:37
+msgid "<uri>"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:43
+msgid "Spice server address"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:44
+msgid "<host>"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:50
+msgid "Spice server port"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:51 ../tools/spice-cmdline.c:58
+msgid "<port>"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:57
+msgid "Spice server secure port"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:64
+msgid "Server password"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:65
+msgid "<password>"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:76
+msgid "Spice connection options:"
+msgstr ""
+
+#: ../tools/spice-cmdline.c:77
+msgid "Show Spice options"
+msgstr ""
+
+#: ../tools/spicy.c:226
+#, c-format
+msgid "mouse: %6s, agent: %3s"
+msgstr ""
+
+#: ../tools/spicy.c:236
+#, c-format
+msgid "\tUse %s to ungrab mouse"
+msgstr ""
+
+#: ../tools/spicy.c:733
+msgid "_View"
+msgstr ""
+
+#: ../tools/spicy.c:734
+msgid "_Input"
+msgstr ""
+
+#: ../tools/spicy.c:735
+msgid "_Options"
+msgstr ""
+
+#: ../tools/spicy.c:736
+msgid "_Preferred image compression"
+msgstr ""
+
+#: ../tools/spicy.c:737
+msgid "_Preferred video codec type"
+msgstr ""
+
+#: ../tools/spicy.c:743
+msgid "_Fullscreen"
+msgstr ""
+
+#: ../tools/spicy.c:749
+msgid "_Resize to"
+msgstr ""
+
+#: ../tools/spicy.c:756
+msgid "_Insert Smartcard"
+msgstr ""
+
+#: ../tools/spicy.c:762
+msgid "_Remove Smartcard"
+msgstr ""
+
+#: ../tools/spicy.c:771
+msgid "_Select USB Devices for redirection"
+msgstr ""
+
+#: ../tools/spicy.c:779
+msgid "Toggle _mouse mode"
+msgstr ""
+
+#: ../tools/spicy.c:802
+msgid "Grab keyboard when active and focused"
+msgstr ""
+
+#: ../tools/spicy.c:806
+msgid "Grab mouse in server mode (no tablet/vdagent)"
+msgstr ""
+
+#: ../tools/spicy.c:810
+msgid "Resize guest to match window size"
+msgstr ""
+
+#: ../tools/spicy.c:814
+msgid "Scale display"
+msgstr ""
+
+#: ../tools/spicy.c:818
+msgid "Disable inputs"
+msgstr ""
+
+#: ../tools/spicy.c:822
+msgid "Sync modifiers"
+msgstr ""
+
+#: ../tools/spicy.c:826
+msgid "Automatic clipboard sharing between host and guest"
+msgstr ""
+
+#: ../tools/spicy.c:830
+msgid "Auto redirect newly plugged in USB devices"
+msgstr ""
+
+#: ../tools/spicy.c:834
+msgid "Statusbar"
+msgstr ""
+
+#: ../tools/spicy.c:838
+msgid "Toolbar"
+msgstr ""
+
+#: ../tools/spicy.c:846
+msgid "auto-glz"
+msgstr ""
+
+#: ../tools/spicy.c:850
+msgid "auto-lz"
+msgstr ""
+
+#: ../tools/spicy.c:854
+msgid "quic"
+msgstr ""
+
+#: ../tools/spicy.c:858
+msgid "glz"
+msgstr ""
+
+#: ../tools/spicy.c:862
+msgid "lz"
+msgstr ""
+
+#: ../tools/spicy.c:867
+msgid "lz4"
+msgstr ""
+
+#: ../tools/spicy.c:872
+msgid "off"
+msgstr ""
+
+#: ../tools/spicy.c:880
+msgid "av1"
+msgstr ""
+
+#: ../tools/spicy.c:884
+msgid "mjpeg"
+msgstr ""
+
+#: ../tools/spicy.c:888
+msgid "vp8"
+msgstr ""
+
+#: ../tools/spicy.c:892
+msgid "vp9"
+msgstr ""
+
+#: ../tools/spicy.c:896
+msgid "h264"
+msgstr ""
+
+#: ../tools/spicy.c:900
+msgid "h265"
+msgstr ""
+
+#: ../tools/spicy.c:1061
+#, c-format
+msgid "Connect to VM"
+msgstr ""
+
+#: ../tools/spicy.c:1399
+msgid "server"
+msgstr ""
+
+#: ../tools/spicy.c:1402
+msgid "client"
+msgstr ""
+
+#: ../tools/spicy.c:1405
+msgid "unknown"
+msgstr ""
+
+#: ../tools/spicy.c:1416
+msgid "yes"
+msgstr ""
+
+#: ../tools/spicy.c:1416
+msgid "no"
+msgstr ""
+
+#: ../tools/spicy.c:1679
+#, c-format
+msgid "Reponse: %i\n"
+msgstr ""
+
+#: ../tools/spicy.c:1961
+msgid "Open in full screen mode"
+msgstr ""
+
+#: ../tools/spicy.c:1966
+msgid "Display version and quit"
+msgstr ""
+
+#: ../tools/spicy.c:1971
+msgid "Set the window title"
+msgstr ""
+
+#: ../tools/spicy.c:1972
+msgid "<title>"
+msgstr ""
+
+#: ../tools/spicy.c:1990
+msgid "USB redirection error"
+msgstr ""
+
+#: ../tools/spicy.c:2066
+msgid "- spice client test application"
+msgstr ""
+
+#: ../tools/spicy.c:2067
+msgid "Gtk+ test client to connect to Spice servers."
+msgstr ""
+
+#: ../tools/spicy.c:2068
+msgid "Report bugs to "
+msgstr ""
+
+#: ../tools/spicy.c:2075
+#, c-format
+msgid "option parsing failed: %s\n"
+msgstr ""
+
+#: ../tools/spicy.c:2081
+msgid "spicy "
+msgstr ""

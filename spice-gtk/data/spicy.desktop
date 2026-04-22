@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Spicy
+GenericName=SPICE Client
+Comment=Connect to SPICE virtual machines
+Exec=spicy %U
+Icon=spicy
+Terminal=false
+Categories=Network;RemoteAccess;
+

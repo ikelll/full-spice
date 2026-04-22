@@ -1,0 +1,6 @@
+*.la
+*.lo
+*.loT
+/spice-version.h
+/spice-server-enums.h
+/spice-server-enums.c

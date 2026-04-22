@@ -1,0 +1,98 @@
+          Spice Authors
+          =============
+
+The current active Spice maintainers are
+
+    Christophe Fergeau <cfergeau@redhat.com>
+    Frediano Ziglio <fziglio@redhat.com>
+    Jonathon Jongsma <jjongsma@redhat.com>
+    Uri Lublin <uril@redhat.com>
+
+Previous Spice maintainers were
+
+    Alon Levy <alevy@redhat.com>
+    Gerd Hoffmann <kraxel@redhat.com>
+    Izik Eidus <ieidus@redhat.com>
+    Marc-André Lureau <marcandre.lureau@redhat.com>
+    Yaniv Kamay <ykamay@redhat.com> (Original project author)
+    Yonit Halperin <yhalperi@redhat.com>
+
+Patches also contributed by
+
+    Alexander Larsson <alexl@redhat.com>
+    Alexander Tsoy <alexander@tsoy.me>
+    Andrew Eikum <aeikum@codeweavers.com>
+    Aric Stewart <aric@codeweavers.com>
+    Arnon Gilboa <agilboa@redhat.com>
+    Axel Lin <axel.lin@ingics.com>
+    소병철 <byungchul.so@samsung.com>
+    Cédric Bosdonnat <cbosdonnat@suse.com>
+    Changqing Li <changqing.li@windriver.com>
+    Christian Ruppert <idl0r@qasl.de>
+    Christophe de Dinechin <dinechin@redhat.com>
+    Cole Robinson <crobinso@redhat.com>
+    Daniel P. Berrange <berrange@redhat.com>
+    Dan Kenigsberg <danken@redhat.com>
+    Dan McGee <dpmcgee@gmail.com>
+    David Gibson <david@gibson.dropbear.id.au>
+    David Jaša <djasa@redhat.com>
+    Dunrong Huang <riegamaths@gmail.com>
+    Eduardo Lima (Etrunko) <etrunko@redhat.com>
+    Erlon Cruz <erlon.cruz@br.flextronics.com>
+    Fabiano Fidêncio <fabiano@fidencio.org>
+    Francois Gouget <fgouget@codeweavers.com>
+    Gal Hammer <ghammer@redhat.com>
+    Gilmar Santos Jr <jgasjr@gmail.com>
+    Hans de Goede <hdegoede@redhat.com>
+    Javier Celaya <javier.celaya@flexvm.es>
+    Jeremy White <jwhite@codeweavers.com>
+    Julien Ropé <jrope@redhat.com>
+    Jürg Billeter <j@bitron.ch>
+    Li Zhijian <lizhijian@cn.fujitsu.com>
+    Liang Guo <bluestonechina@gmail.com>
+    Lukáš Hrázký <lhrazky@redhat.com>
+    Lukas Venhoda <lvenhoda@redhat.com>
+    Michal Privoznik <mprivozn@redhat.com>
+    Michael Tokarev <mjt@tls.msk.ru>
+    Nahum Shalman <nshalman@elys.com>
+    Nikolay Orlyuk <virkony@gmail.com>
+    Pavel Grunt <pgrunt@redhat.com>
+    Peter Robinson <pbrobinson@gmail.com>
+    Sandy Stutsman <sstutsma@redhat.com>
+    Snir Sheriber <ssheribe@redhat.com>
+    Sunny Shin <sunny4s.git@gmail.com>
+    Søren Sandmann Pedersen <ssp@redhat.com>
+    Thomas Tyminski <thomast@cs.tu-berlin.de>
+    Tiziano Mueller <dev-zero@gentoo.org>
+    Victor Toso <victortoso@redhat.com>
+    Wang Qiang <wangqiang.hunan@gmail.com>
+    Yann E. MORIN <yann.morin.1998@free.fr>
+    Zeeshan Ali (Khattak) <zeeshanak@gnome.org>
+    Douglas Paul <doug@bogon.ca>
+    谢 昆明 <kunming.xie@hotmail.com>
+    Benjamin Tissoires <benjamin.tissoires@redhat.com>
+    Olivier Fourdan <ofourdan@redhat.com>
+    worldofpeace <worldofpeace@protonmail.ch>
+    Thiago Mendes <tribeirom@gmail.com>
+    Christian Ehrhardt <christian.ehrhardt@canonical.com>
+    Kevin Pouget <kpouget@redhat.com>
+    Rosen Penev <rosenp@gmail.com>
+    James Le Cuirot <chewi@gentoo.org>
+    Frediano Ziglio <freddy77@gmail.com>
+    Stefan Weil <sw@weilnetz.de>
+    Roman Bogorodskiy <bogorodskiy@gmail.com>
+    Tomasz Kłoczko <kloczek@github.com>
+    Qiuhao Li <Qiuhao.Li@outlook.com>
+    Hunter Sezen <orbea@riseup.net>
+    Simon Chopin <simon.chopin@canonical.com>
+    Geoffrey McRae <geoff@hostfission.com>
+    Antonio Larrosa <antonio.larrosa@gmail.com>
+    Volker Rümelin <vr_qemu@t-online.de>
+    Biswapriyo Nath <nathbappai@gmail.com>
+    Vivek Kasireddy <vivek.kasireddy@intel.com>
+    osy <osy@turing.llc>
+    Michael Scherle <michael.scherle@rz.uni-freiburg.de>
+    Weishi Li <liweishi@kylinos.cn>
+    Qiang Yu <yuq825@gmail.com>
+
+   ....send patches to get your name here...

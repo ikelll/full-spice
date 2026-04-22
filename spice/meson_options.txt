@@ -1,0 +1,53 @@
+option('gstreamer',
+    type : 'combo',
+    choices : ['1.0', 'no'],
+    description : 'Enable gstreamer support')
+
+option('lz4',
+    type : 'boolean',
+    value : true,
+    description: 'Enable lz4 compression support')
+
+option('sasl',
+    type : 'boolean',
+    value : true,
+    description : 'Use cyrus SASL authentication')
+
+option('opus',
+    type : 'feature',
+    description: 'Enable Opus audio codec')
+
+option('smartcard',
+    type : 'feature',
+    description : 'Enable smartcard support')
+
+option('alignment-checks',
+    type : 'boolean',
+    value : false,
+    description : 'Enable runtime checks for cast alignment')
+
+option('extra-checks',
+    type : 'boolean',
+    value: false,
+    description : 'Enable extra checks on code')
+
+option('statistics',
+    type : 'boolean',
+    value: false,
+    description : 'Build SPICE with statistic code enabled')
+
+option('manual',
+    type : 'boolean',
+    value : true,
+    description : 'Build SPICE manual')
+
+option('instrumentation',
+    type : 'combo',
+    value : 'no',
+    choices : ['recorder', 'agent', 'no'],
+    description: 'Enable instrumentation')
+
+option('tests',
+    type : 'boolean',
+    value : true,
+    description : 'Build the test binaries')

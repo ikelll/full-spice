@@ -1,0 +1,6 @@
+<gresources>
+  <gresource prefix="/org/spice/spicy">
+    <file>icons/spicy.png</file>
+  </gresource>
+</gresources>
+

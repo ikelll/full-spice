@@ -1,0 +1,14 @@
+prefix=/opt/GorizontVS-VDI/spice
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: spice-server
+Description: SPICE server library
+Version: 0.16.0.5-4a07d-dirty
+
+Requires: spice-protocol >= 0.14.5
+Requires.private:  libcacard >= 2.5.1 glib-2.0 >= 2.38 pixman-1 >= 0.17.7 openssl
+Libs: -L${libdir} -lspice-server
+Libs.private:  -pthread -lm -lrt
+Cflags: -I${includedir}/spice-server

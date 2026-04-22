@@ -1,0 +1,1091 @@
+/*
+   Copyright (C) 2009-2015 Red Hat, Inc.
+
+   This library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 2.1 of the License, or (at your option) any later version.
+
+   This library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
+
+   You should have received a copy of the GNU Lesser General Public
+   License along with this library; if not, see <http://www.gnu.org/licenses/>.
+*/
+#include <config.h>
+
+#include "video-stream.h"
+#include "display-channel-private.h"
+#include "main-channel-client.h"
+#include "red-client.h"
+#include "red-qxl.h"
+
+#define FPS_TEST_INTERVAL 1
+#define FOREACH_STREAMS(display, item)                  \
+    RING_FOREACH(item, &(display)->priv->streams)
+
+static void video_stream_unref(DisplayChannel *display, VideoStream *stream);
+static void video_stream_agent_unref(DisplayChannel *display, VideoStreamAgent *agent);
+
+static void video_stream_agent_stats_print(VideoStreamAgent *agent)
+{
+#ifdef STREAM_STATS
+    StreamStats *stats = &agent->stats;
+    double passed_mm_time = (stats->end - stats->start) / 1000.0;
+    VideoEncoderStats encoder_stats = {0};
+
+    if (agent->video_encoder) {
+        agent->video_encoder->get_stats(agent->video_encoder, &encoder_stats);
+    }
+
+    spice_debug("stream=%p dim=(%dx%d) #in-frames=%" PRIu64 " #in-avg-fps=%.2f "
+                "#out-frames=%" PRIu64 " out/in=%.2f #drops=%" PRIu64 " (#pipe=%" PRIu64 " "
+                "#fps=%" PRIu64 ") out-avg-fps=%.2f passed-mm-time(sec)=%.2f "
+                "size-total(MB)=%.2f size-per-sec(Mbps)=%.2f size-per-frame(KBpf)=%.2f "
+                "avg-quality=%.2f start-bit-rate(Mbps)=%.2f end-bit-rate(Mbps)=%.2f",
+                agent, agent->stream->width, agent->stream->height,
+                stats->num_input_frames,
+                stats->num_input_frames / passed_mm_time,
+                stats->num_frames_sent,
+                (stats->num_frames_sent + 0.0) / stats->num_input_frames,
+                stats->num_drops_pipe +
+                stats->num_drops_fps,
+                stats->num_drops_pipe,
+                stats->num_drops_fps,
+                stats->num_frames_sent / passed_mm_time,
+                passed_mm_time,
+                stats->size_sent / 1024.0 / 1024.0,
+                ((stats->size_sent * 8.0) / (1024.0 * 1024)) / passed_mm_time,
+                stats->size_sent / 1000.0 / stats->num_frames_sent,
+                encoder_stats.avg_quality,
+                encoder_stats.starting_bit_rate / (1024.0 * 1024),
+                encoder_stats.cur_bit_rate / (1024.0 * 1024));
+#endif
+}
+
+StreamCreateDestroyItem::~StreamCreateDestroyItem()
+{
+    DisplayChannel *display = DCC_TO_DC(agent->dcc);
+    video_stream_agent_unref(display, agent);
+}
+
+StreamCreateDestroyItem::StreamCreateDestroyItem(VideoStreamAgent *init_agent, int init_type):
+    RedPipeItem(init_type),
+    agent(init_agent)
+{
+    agent->stream->refs++;
+}
+
+static RedPipeItemPtr video_stream_create_item_new(VideoStreamAgent *agent)
+{
+    return red::make_shared<StreamCreateDestroyItem>(agent, RED_PIPE_ITEM_TYPE_STREAM_CREATE);
+}
+
+static RedPipeItemPtr video_stream_destroy_item_new(VideoStreamAgent *agent)
+{
+    return red::make_shared<StreamCreateDestroyItem>(agent, RED_PIPE_ITEM_TYPE_STREAM_DESTROY);
+}
+
+
+void video_stream_stop(DisplayChannel *display, VideoStream *stream)
+{
+    DisplayChannelClient *dcc;
+    int stream_id = display_channel_get_video_stream_id(display, stream);
+
+    spice_return_if_fail(ring_item_is_linked(&stream->link));
+    spice_return_if_fail(!stream->current);
+
+    spice_debug("stream %d", stream_id);
+    FOREACH_DCC(display, dcc) {
+        VideoStreamAgent *stream_agent;
+
+        stream_agent = dcc_get_video_stream_agent(dcc, stream_id);
+        region_clear(&stream_agent->vis_region);
+        region_clear(&stream_agent->clip);
+        if (stream_agent->video_encoder) {
+            uint64_t stream_bit_rate = stream_agent->video_encoder->get_bit_rate(stream_agent->video_encoder);
+
+            if (stream_bit_rate > dcc_get_max_stream_bit_rate(dcc)) {
+                spice_debug("old max-bit-rate=%.2f new=%.2f",
+                            dcc_get_max_stream_bit_rate(dcc) / 8.0 / 1024.0 / 1024.0,
+                            stream_bit_rate / 8.0 / 1024.0 / 1024.0);
+                dcc_set_max_stream_bit_rate(dcc, stream_bit_rate);
+            }
+        }
+        dcc->pipe_add(video_stream_destroy_item_new(stream_agent));
+        video_stream_agent_stats_print(stream_agent);
+
+        if (stream == display->priv->gl_draw_stream) {
+            display->priv->gl_draw_stream = nullptr;
+        }
+    }
+    display->priv->streams_size_total -= stream->width * stream->height;
+    ring_remove(&stream->link);
+    video_stream_unref(display, stream);
+}
+
+static void video_stream_free(DisplayChannel *display, VideoStream *stream)
+{
+    stream->next = display->priv->free_streams;
+    display->priv->free_streams = stream;
+}
+
+void display_channel_init_video_streams(DisplayChannel *display)
+{
+    ring_init(&display->priv->streams);
+    display->priv->free_streams = nullptr;
+    for (auto &&stream : display->priv->streams_buf) {
+        ring_item_init(&stream.link);
+        video_stream_free(display, &stream);
+    }
+}
+
+void video_stream_unref(DisplayChannel *display, VideoStream *stream)
+{
+    if (--stream->refs != 0)
+        return;
+
+    spice_warn_if_fail(!ring_item_is_linked(&stream->link));
+
+    video_stream_free(display, stream);
+    display->priv->stream_count--;
+}
+
+void video_stream_agent_unref(DisplayChannel *display, VideoStreamAgent *agent)
+{
+    video_stream_unref(display, agent->stream);
+}
+
+VideoStreamClipItem::~VideoStreamClipItem()
+{
+    DisplayChannel *display = DCC_TO_DC(stream_agent->dcc);
+
+    video_stream_agent_unref(display, stream_agent);
+}
+
+VideoStreamClipItem::VideoStreamClipItem(VideoStreamAgent *agent):
+    RedPipeItem(RED_PIPE_ITEM_TYPE_STREAM_CLIP),
+    stream_agent(agent),
+    clip_type(SPICE_CLIP_TYPE_RECTS)
+{
+    agent->stream->refs++;
+
+    int n_rects = pixman_region32_n_rects(&agent->clip);
+    rects.reset(static_cast<SpiceClipRects *>(
+        g_malloc(sizeof(SpiceClipRects) + n_rects * sizeof(SpiceRect))));
+    rects->num_rects = n_rects;
+    region_ret_rects(&agent->clip, rects->rects, n_rects);
+}
+
+static int is_stream_start(Drawable *drawable)
+{
+    return ((drawable->frames_count >= RED_STREAM_FRAMES_START_CONDITION) &&
+            (drawable->gradual_frames_count >=
+             (RED_STREAM_GRADUAL_FRAMES_START_CONDITION * drawable->frames_count)));
+}
+
+static void update_copy_graduality(DisplayChannel *display, Drawable *drawable)
+{
+    SpiceBitmap *bitmap;
+    spice_return_if_fail(drawable->red_drawable->type == QXL_DRAW_COPY);
+
+    if (display_channel_get_stream_video(display) != SPICE_STREAM_VIDEO_FILTER) {
+        drawable->copy_bitmap_graduality = BITMAP_GRADUAL_INVALID;
+        return;
+    }
+
+    if (drawable->copy_bitmap_graduality != BITMAP_GRADUAL_INVALID) {
+        return; // already set
+    }
+
+    bitmap = &drawable->red_drawable->u.copy.src_bitmap->u.bitmap;
+
+    if (!bitmap_fmt_has_graduality(bitmap->format) || bitmap_has_extra_stride(bitmap) ||
+        (bitmap->data->flags & SPICE_CHUNKS_FLAGS_UNSTABLE)) {
+        drawable->copy_bitmap_graduality = BITMAP_GRADUAL_NOT_AVAIL;
+    } else  {
+        drawable->copy_bitmap_graduality = bitmap_get_graduality_level(bitmap);
+    }
+}
+
+static bool is_next_stream_frame(const Drawable *candidate,
+                                 const int other_src_width,
+                                 const int other_src_height,
+                                 const SpiceRect *other_dest,
+                                 const red_time_t other_time,
+                                 const VideoStream *stream,
+                                 int container_candidate_allowed)
+{
+    RedDrawable *red_drawable;
+
+    if (!candidate->streamable) {
+        return FALSE;
+    }
+
+    if (candidate->creation_time - other_time >
+            (stream ? RED_STREAM_CONTINUOUS_MAX_DELTA : RED_STREAM_DETECTION_MAX_DELTA)) {
+        return FALSE;
+    }
+
+    red_drawable = candidate->red_drawable.get();
+    if (!container_candidate_allowed) {
+        SpiceRect* candidate_src;
+
+        if (!rect_is_equal(&red_drawable->bbox, other_dest)) {
+            return FALSE;
+        }
+
+        candidate_src = &red_drawable->u.copy.src_area;
+        if (candidate_src->right - candidate_src->left != other_src_width ||
+            candidate_src->bottom - candidate_src->top != other_src_height) {
+            return FALSE;
+        }
+    } else {
+        if (!rect_contains(&red_drawable->bbox, other_dest)) {
+            return FALSE;
+        }
+        int candidate_area = rect_get_area(&red_drawable->bbox);
+        int other_area = rect_get_area(other_dest);
+        /* do not stream drawables that are significantly
+         * bigger than the original frame */
+        if (candidate_area > 2 * other_area) {
+            spice_debug("too big candidate:");
+            spice_debug("prev box ==>");
+            rect_debug(other_dest);
+            spice_debug("new box ==>");
+            rect_debug(&red_drawable->bbox);
+            return FALSE;
+        }
+    }
+
+    if (stream) {
+        SpiceBitmap *bitmap = &red_drawable->u.copy.src_bitmap->u.bitmap;
+        if (stream->top_down != !!(bitmap->flags & SPICE_BITMAP_FLAGS_TOP_DOWN)) {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static void attach_stream(DisplayChannel *display, Drawable *drawable, VideoStream *stream)
+{
+    DisplayChannelClient *dcc;
+
+    spice_assert(drawable && stream);
+    spice_assert(!drawable->stream && !stream->current);
+    stream->current = drawable;
+    drawable->stream = stream;
+    stream->last_time = drawable->creation_time;
+
+    uint64_t duration = drawable->creation_time - stream->input_fps_start_time;
+    if (duration >= RED_STREAM_INPUT_FPS_TIMEOUT) {
+        /* Round to the nearest integer, for instance 24 for 23.976 */
+        stream->input_fps =
+            (uint64_t{stream->num_input_frames} * 1000 * 1000 * 1000 + duration / 2) / duration;
+        spice_debug("input-fps=%u", stream->input_fps);
+        stream->num_input_frames = 0;
+        stream->input_fps_start_time = drawable->creation_time;
+    } else {
+        stream->num_input_frames++;
+    }
+
+    int stream_id = display_channel_get_video_stream_id(display, stream);
+    FOREACH_DCC(display, dcc) {
+        VideoStreamAgent *agent;
+        QRegion clip_in_draw_dest;
+
+        agent = dcc_get_video_stream_agent(dcc, stream_id);
+        region_or(&agent->vis_region, &drawable->tree_item.base.rgn);
+
+        region_init(&clip_in_draw_dest);
+        region_add(&clip_in_draw_dest, &drawable->red_drawable->bbox);
+        region_and(&clip_in_draw_dest, &agent->clip);
+
+        if (!region_is_equal(&clip_in_draw_dest, &drawable->tree_item.base.rgn)) {
+            region_remove(&agent->clip, &drawable->red_drawable->bbox);
+            region_or(&agent->clip, &drawable->tree_item.base.rgn);
+            dcc_video_stream_agent_clip(dcc, agent);
+        }
+        region_destroy(&clip_in_draw_dest);
+#ifdef STREAM_STATS
+        agent->stats.num_input_frames++;
+#endif
+    }
+}
+
+void video_stream_detach_drawable(VideoStream *stream)
+{
+    spice_assert(stream->current && stream->current->stream);
+    spice_assert(stream->current->stream == stream);
+    stream->current->stream = nullptr;
+    stream->current = nullptr;
+}
+
+static void before_reattach_stream(DisplayChannel *display,
+                                   VideoStream *stream, Drawable *new_frame)
+{
+    DisplayChannelClient *dcc;
+    int index;
+    VideoStreamAgent *agent;
+    GList *dpi_link, *dpi_next;
+
+    spice_return_if_fail(stream->current);
+
+    if (!display->is_connected()) {
+        return;
+    }
+
+    if (new_frame->process_commands_generation == stream->current->process_commands_generation) {
+        spice_debug("ignoring drop, same process_commands_generation as previous frame");
+        return;
+    }
+
+    index = display_channel_get_video_stream_id(display, stream);
+    for (dpi_link = stream->current->pipes; dpi_link; dpi_link = dpi_next) {
+        auto dpi = static_cast<RedDrawablePipeItem *>(dpi_link->data);
+        dpi_next = dpi_link->next;
+        dcc = dpi->dcc;
+        agent = dcc_get_video_stream_agent(dcc, index);
+
+        if (dcc->pipe_item_is_linked(dpi)) {
+#ifdef STREAM_STATS
+            agent->stats.num_drops_pipe++;
+#endif
+            if (agent->video_encoder) {
+                agent->video_encoder->notify_server_frame_drop(agent->video_encoder);
+            }
+        }
+    }
+}
+
+static VideoStream *display_channel_stream_try_new(DisplayChannel *display)
+{
+    VideoStream *stream;
+    if (!display->priv->free_streams) {
+        return nullptr;
+    }
+    stream = display->priv->free_streams;
+    display->priv->free_streams = display->priv->free_streams->next;
+    return stream;
+}
+
+static void display_channel_init_stream(DisplayChannel *display,
+                                        VideoStream *stream,
+                                        Drawable *drawable,
+                                        SpiceRect* src_rect)
+{
+    SpiceBitmap *bitmap;
+    uint64_t duration;
+
+    ring_add(&display->priv->streams, &stream->link);
+    stream->current = drawable;
+    stream->last_time = drawable ? drawable->creation_time :
+                        spice_get_monotonic_time_ns();
+    stream->width = src_rect->right - src_rect->left;
+    stream->height = src_rect->bottom - src_rect->top;
+    stream->dest_area = *src_rect;
+    stream->refs = 1;
+    stream->input_fps = MAX_FPS;
+    stream->num_input_frames = 0;
+    stream->input_fps_start_time = stream->last_time;
+    display->priv->streams_size_total += stream->width * stream->height;
+    display->priv->stream_count++;
+
+    if (drawable) {
+        drawable->stream = stream;
+        stream->dest_area = drawable->red_drawable->bbox;
+        bitmap = &drawable->red_drawable->u.copy.src_bitmap->u.bitmap;
+        stream->top_down = !!(bitmap->flags & SPICE_BITMAP_FLAGS_TOP_DOWN);
+
+        /* Provide an fps estimate the video encoder can use when initializing
+         * based on the frames that lead to the creation of the stream. Round
+         * to the nearest integer, for instance 24 for 23.976.
+         */
+        duration = drawable->creation_time - drawable->first_frame_time;
+        if (duration > NSEC_PER_SEC * drawable->frames_count / MAX_FPS) {
+            stream->input_fps = (NSEC_PER_SEC * drawable->frames_count + duration / 2) / duration;
+        }
+    }
+
+    spice_debug("stream %d %dx%d (%d, %d) (%d, %d) %u fps",
+                display_channel_get_video_stream_id(display, stream), stream->width,
+                stream->height, stream->dest_area.left, stream->dest_area.top,
+                stream->dest_area.right, stream->dest_area.bottom,
+                stream->input_fps);
+}
+
+static void display_channel_create_stream(DisplayChannel *display,
+                                          Drawable *drawable)
+{
+    DisplayChannelClient *dcc;
+    VideoStream *stream;
+    SpiceRect* src_rect;
+
+    spice_assert(!drawable->stream);
+
+    if (!(stream = display_channel_stream_try_new(display))) {
+        return;
+    }
+
+    spice_assert(drawable->red_drawable->type == QXL_DRAW_COPY);
+    src_rect = &drawable->red_drawable->u.copy.src_area;
+
+    display_channel_init_stream(display, stream, drawable, src_rect);
+    FOREACH_DCC(display, dcc) {
+        dcc_create_stream(dcc, stream);
+    }
+}
+
+bool display_channel_create_gl_draw_stream(DisplayChannel *display)
+{
+    QXLInstance* qxl = display->priv->qxl;
+    RedGLScanout *scanout = red_qxl_get_gl_scanout(qxl);
+    DisplayChannelClient *dcc;
+    VideoStream *stream;
+    bool ret = false;
+
+    if (!scanout) {
+        return false;
+    }
+    SpiceRect dest_area = {
+        .left = 0,
+        .top = 0,
+        .right = scanout->width,
+        .bottom = scanout->height
+    };
+
+    if (display->priv->surfaces[0]) {
+        display_channel_surface_id_unref(display, 0);
+    }
+    if (!display_channel_create_surface(display, 0, scanout->width,
+                                        scanout->height, scanout->stride[0],
+                                        SPICE_SURFACE_FMT_32_xRGB,
+                                        nullptr, true, true)) {
+        goto err;
+    }
+
+    display_channel_set_monitors_config_to_primary(display);
+    display_channel_push_monitors_config(display);
+    display->pipes_add_empty_msg(SPICE_MSG_DISPLAY_MARK);
+    display->push();
+
+    if (!(stream = display_channel_stream_try_new(display))) {
+        goto err;
+    }
+
+    ret = true;
+    display_channel_init_stream(display, stream, nullptr, &dest_area);
+    stream->top_down = (scanout->flags & SPICE_GL_SCANOUT_FLAGS_Y0TOP) ? 0 : 1;
+    stream->stride = scanout->stride[0];
+    /* This is the upper bound; it should be possible to stream at 60 FPS
+     * with a hardware based encoder.
+     */
+    stream->input_fps = MAX_FPS * 2;
+
+    display->priv->gl_draw_stream = stream;
+    FOREACH_DCC(display, dcc) {
+        dcc_create_stream(dcc, stream);
+    }
+err:
+    red_qxl_put_gl_scanout(qxl, scanout);
+    return ret;
+}
+
+bool is_new_stream_needed(DisplayChannel *display)
+{
+    VideoStream *stream = display->priv->gl_draw_stream;
+    if (!stream) {
+        return true;
+    }
+
+    QXLInstance* qxl = display->priv->qxl;
+    RedGLScanout *scanout = red_qxl_get_gl_scanout(qxl);
+    uint32_t width, height, top_down;
+
+    if (!scanout) {
+        return true;
+    }
+
+    width = scanout->width;
+    height = scanout->height;
+    top_down = (scanout->flags & SPICE_GL_SCANOUT_FLAGS_Y0TOP) ? 0 : 1;
+    red_qxl_put_gl_scanout(qxl, scanout);
+
+    if (stream->width == width &&
+        stream->height == height &&
+        stream->top_down == top_down) {
+        return false;
+    }
+    return true;
+}
+
+bool display_channel_update_gl_draw_stream(DisplayChannelClient *dcc,
+                                           const SpiceMsgDisplayGlDraw *draw)
+{
+    DisplayChannel *display = DCC_TO_DC(dcc);
+    SpiceRect dest_area = {
+        .left = draw->x,
+        .top = draw->y,
+        .right = draw->w,
+        .bottom = draw->h
+    };
+
+    if (is_new_stream_needed(display)) {
+        if (!display_channel_create_gl_draw_stream(display)) {
+            return false;
+        }
+    }
+
+    VideoStream *stream = display->priv->gl_draw_stream;
+    int stream_id = display_channel_get_video_stream_id(display, stream);
+    VideoStreamAgent *agent = dcc_get_video_stream_agent(dcc, stream_id);
+
+    /* Just a sanity check to make sure that an encoder was created */
+    if (!agent->video_encoder) {
+        dcc_create_stream(dcc, stream);
+        if (!agent->video_encoder) {
+            return false;
+        }
+    }
+
+    stream->dest_area = dest_area;
+    stream->last_time = spice_get_monotonic_time_ns();
+    return true;
+}
+
+// returns whether a stream was created
+static bool video_stream_add_frame(DisplayChannel *display,
+                             Drawable *frame_drawable,
+                             red_time_t first_frame_time,
+                             int frames_count,
+                             int gradual_frames_count,
+                             int last_gradual_frame)
+{
+    update_copy_graduality(display, frame_drawable);
+    frame_drawable->first_frame_time = first_frame_time;
+    frame_drawable->frames_count = frames_count + 1;
+    frame_drawable->gradual_frames_count  = gradual_frames_count;
+
+    if (frame_drawable->copy_bitmap_graduality != BITMAP_GRADUAL_LOW) {
+        if ((frame_drawable->frames_count - last_gradual_frame) >
+            RED_STREAM_FRAMES_RESET_CONDITION) {
+            frame_drawable->frames_count = 1;
+            frame_drawable->gradual_frames_count = 1;
+        } else {
+            frame_drawable->gradual_frames_count++;
+        }
+
+        frame_drawable->last_gradual_frame = frame_drawable->frames_count;
+    } else {
+        frame_drawable->last_gradual_frame = last_gradual_frame;
+    }
+
+    if (is_stream_start(frame_drawable)) {
+        display_channel_create_stream(display, frame_drawable);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* Returns an array with SPICE_VIDEO_CODEC_TYPE_ENUM_END elements,
+ * with the client preference order (index) as value */
+GArray *video_stream_parse_preferred_codecs(SpiceMsgcDisplayPreferredVideoCodecType *msg)
+{
+    int i, len;
+    int indexes[SPICE_VIDEO_CODEC_TYPE_ENUM_END];
+    GArray *client;
+
+    /* set default to a big and positive number */
+    memset(indexes, 0x7f, sizeof(indexes));
+
+    for (len = 0, i = 0; i < msg->num_of_codecs; i++) {
+        auto video_codec = msg->codecs[i];
+
+        if (video_codec < SPICE_VIDEO_CODEC_TYPE_MJPEG ||
+            video_codec >= SPICE_VIDEO_CODEC_TYPE_ENUM_END) {
+            spice_debug("Client has sent unknown video-codec (value %d at index %d). "
+                        "Ignoring as server can't handle it",
+                         video_codec, i);
+            continue;
+        }
+
+        if (indexes[video_codec] < SPICE_VIDEO_CODEC_TYPE_ENUM_END) {
+            continue;
+        }
+
+        len++;
+        indexes[video_codec] = len;
+    }
+    client = g_array_sized_new(FALSE, FALSE, sizeof(int), SPICE_VIDEO_CODEC_TYPE_ENUM_END);
+    g_array_append_vals(client, indexes, SPICE_VIDEO_CODEC_TYPE_ENUM_END);
+
+    return client;
+}
+
+/* TODO: document the difference between the 2 functions below */
+void video_stream_trace_update(DisplayChannel *display, Drawable *drawable)
+{
+    RingItem *item;
+
+    if (drawable->stream || !drawable->streamable || drawable->frames_count) {
+        return;
+    }
+
+    FOREACH_STREAMS(display, item) {
+        VideoStream *stream = SPICE_CONTAINEROF(item, VideoStream, link);
+        bool is_next_frame = is_next_stream_frame(drawable,
+                                                  stream->width,
+                                                  stream->height,
+                                                  &stream->dest_area,
+                                                  stream->last_time,
+                                                  stream,
+                                                  TRUE);
+        if (is_next_frame) {
+            if (stream->current) {
+                stream->current->streamable = FALSE; //prevent item trace
+                before_reattach_stream(display, stream, drawable);
+                video_stream_detach_drawable(stream);
+            }
+            attach_stream(display, drawable, stream);
+            return;
+        }
+    }
+
+    for (auto &&trace : display->priv->items_trace) {
+        if (is_next_stream_frame(drawable, trace.width, trace.height, &trace.dest_area, trace.time,
+                                 nullptr, false)) {
+            if (video_stream_add_frame(display, drawable, trace.first_frame_time,
+                                       trace.frames_count, trace.gradual_frames_count,
+                                       trace.last_gradual_frame)) {
+                return;
+            }
+        }
+    }
+}
+
+void video_stream_maintenance(DisplayChannel *display,
+                              Drawable *candidate, Drawable *prev)
+{
+    bool is_next_frame;
+
+    if (candidate->stream) {
+        return;
+    }
+
+    if (prev->stream) {
+        VideoStream *stream = prev->stream;
+
+        is_next_frame = is_next_stream_frame(candidate,
+                                             stream->width, stream->height,
+                                             &stream->dest_area, stream->last_time,
+                                             stream, TRUE);
+        if (is_next_frame) {
+            before_reattach_stream(display, stream, candidate);
+            video_stream_detach_drawable(stream);
+            prev->streamable = FALSE; //prevent item trace
+            attach_stream(display, candidate, stream);
+        }
+    } else if (candidate->streamable) {
+        SpiceRect* prev_src = &prev->red_drawable->u.copy.src_area;
+
+        is_next_frame =
+            is_next_stream_frame(candidate, prev_src->right - prev_src->left,
+                                 prev_src->bottom - prev_src->top,
+                                 &prev->red_drawable->bbox, prev->creation_time,
+                                 prev->stream,
+                                 FALSE);
+        if (is_next_frame) {
+            video_stream_add_frame(display, candidate,
+                                   prev->first_frame_time,
+                                   prev->frames_count,
+                                   prev->gradual_frames_count,
+                                   prev->last_gradual_frame);
+        }
+    }
+}
+
+static uint64_t get_initial_bit_rate(DisplayChannelClient *dcc, VideoStream *stream)
+{
+    char *env_bit_rate_str;
+    uint64_t bit_rate = 0;
+
+    env_bit_rate_str = getenv("SPICE_BIT_RATE");
+    if (env_bit_rate_str != nullptr) {
+        double env_bit_rate;
+
+        errno = 0;
+        env_bit_rate = strtod(env_bit_rate_str, nullptr);
+        if (errno == 0 && env_bit_rate > 0) {
+            bit_rate = env_bit_rate * 1024 * 1024;
+        } else {
+            spice_warning("error parsing SPICE_BIT_RATE: %s", strerror(errno));
+        }
+    }
+
+    if (!bit_rate) {
+        MainChannelClient *mcc;
+        uint64_t net_test_bit_rate;
+
+        mcc = dcc->get_client()->get_main();
+        net_test_bit_rate = mcc->is_network_info_initialized() ?
+                                mcc->get_bitrate_per_sec() :
+                                0;
+        bit_rate = MAX(dcc_get_max_stream_bit_rate(dcc), net_test_bit_rate);
+        if (bit_rate == 0) {
+            /*
+             * In case we are after a spice session migration,
+             * the low_bandwidth flag is retrieved from migration data.
+             * If the network info is not initialized due to another reason,
+             * the low_bandwidth flag is FALSE.
+             */
+            bit_rate = dcc_is_low_bandwidth(dcc) ?
+                RED_STREAM_DEFAULT_LOW_START_BIT_RATE :
+                RED_STREAM_DEFAULT_HIGH_START_BIT_RATE;
+        }
+    }
+
+    spice_debug("base-bit-rate %.2f (Mbps)", bit_rate / 1024.0 / 1024.0);
+    /* dividing the available bandwidth among the active streams, and saving
+     * (1-RED_STREAM_CHANNEL_CAPACITY) of it for other messages */
+    return (RED_STREAM_CHANNEL_CAPACITY * bit_rate *
+            stream->width * stream->height) / DCC_TO_DC(dcc)->priv->streams_size_total;
+}
+
+static uint32_t get_roundtrip_ms(void *opaque)
+{
+    auto agent = static_cast<VideoStreamAgent *>(opaque);
+    int roundtrip;
+    RedChannelClient *rcc = agent->dcc;
+
+    roundtrip = rcc->get_roundtrip_ms();
+    if (roundtrip < 0) {
+        MainChannelClient *mcc = rcc->get_client()->get_main();
+
+        /*
+         * the main channel client roundtrip might not have been
+         * calculated (e.g., after migration). In such case,
+         * main_channel_client_get_roundtrip_ms returns 0.
+         */
+        roundtrip = mcc->get_roundtrip_ms();
+    }
+
+    return roundtrip;
+}
+
+static uint32_t get_source_fps(void *opaque)
+{
+    auto agent = static_cast<VideoStreamAgent *>(opaque);
+
+    return agent->stream->input_fps;
+}
+
+static void update_client_playback_delay(void *opaque, uint32_t delay_ms)
+{
+}
+
+static void bitmap_ref(gpointer data)
+{
+    auto red_drawable = static_cast<RedDrawable *>(data);
+    shared_ptr_add_ref(red_drawable);
+}
+
+static void bitmap_unref(gpointer data)
+{
+    auto red_drawable = static_cast<RedDrawable *>(data);
+    shared_ptr_unref(red_drawable);
+}
+
+/* A helper for dcc_create_stream(). */
+static VideoEncoder* dcc_create_video_encoder(DisplayChannelClient *dcc,
+                                              uint64_t starting_bit_rate,
+                                              VideoEncoderRateControlCbs *cbs)
+{
+    bool client_has_multi_codec = dcc->test_remote_cap(SPICE_DISPLAY_CAP_MULTI_CODEC);
+    int i;
+    GArray *video_codecs;
+
+    video_codecs = dcc_get_preferred_video_codecs_for_encoding(dcc);
+    for (i = 0; i < video_codecs->len; i++) {
+        RedVideoCodec* video_codec = &g_array_index (video_codecs, RedVideoCodec, i);
+
+        if (!client_has_multi_codec &&
+            video_codec->type != SPICE_VIDEO_CODEC_TYPE_MJPEG) {
+            /* Old clients only support MJPEG */
+            continue;
+        }
+        if (client_has_multi_codec &&
+            !dcc->test_remote_cap(video_codec->cap)) {
+            /* The client is recent but does not support this codec */
+            continue;
+        }
+
+        VideoEncoder* video_encoder = video_codec->create(video_codec->type, starting_bit_rate, cbs, bitmap_ref, bitmap_unref);
+        if (video_encoder) {
+            return video_encoder;
+        }
+    }
+
+    /* Try to use the builtin MJPEG video encoder as a fallback */
+    if (!client_has_multi_codec || dcc->test_remote_cap(SPICE_DISPLAY_CAP_CODEC_MJPEG)) {
+        return mjpeg_encoder_new(SPICE_VIDEO_CODEC_TYPE_MJPEG, starting_bit_rate, cbs, bitmap_ref, bitmap_unref);
+    }
+
+    return nullptr;
+}
+
+void dcc_create_stream(DisplayChannelClient *dcc, VideoStream *stream)
+{
+    int stream_id = display_channel_get_video_stream_id(DCC_TO_DC(dcc), stream);
+    VideoStreamAgent *agent = dcc_get_video_stream_agent(dcc, stream_id);
+
+    spice_return_if_fail(region_is_empty(&agent->vis_region));
+
+    if (stream->current) {
+        region_clone(&agent->vis_region, &stream->current->tree_item.base.rgn);
+        region_clone(&agent->clip, &agent->vis_region);
+    }
+    agent->dcc = dcc;
+
+    VideoEncoderRateControlCbs video_cbs;
+    video_cbs.opaque = agent;
+    video_cbs.get_roundtrip_ms = get_roundtrip_ms;
+    video_cbs.get_source_fps = get_source_fps;
+    video_cbs.update_client_playback_delay = update_client_playback_delay;
+
+    uint64_t initial_bit_rate = get_initial_bit_rate(dcc, stream);
+    agent->video_encoder = dcc_create_video_encoder(dcc, initial_bit_rate, &video_cbs);
+    dcc->pipe_add(video_stream_create_item_new(agent));
+
+    if (dcc->test_remote_cap(SPICE_DISPLAY_CAP_STREAM_REPORT)) {
+        auto report_pipe_item = red::make_shared<RedStreamActivateReportItem>();
+
+        agent->report_id = rand();
+        report_pipe_item->stream_id = stream_id;
+        report_pipe_item->report_id = agent->report_id;
+        dcc->pipe_add(report_pipe_item);
+    }
+#ifdef STREAM_STATS
+    memset(&agent->stats, 0, sizeof(StreamStats));
+    if (stream->current) {
+        agent->stats.start = stream->current->red_drawable->mm_time;
+    }
+#endif
+}
+
+void video_stream_agent_stop(VideoStreamAgent *agent)
+{
+    if (agent->video_encoder) {
+        agent->video_encoder->destroy(agent->video_encoder);
+        agent->video_encoder = nullptr;
+    }
+}
+
+RedUpgradeItem::~RedUpgradeItem()
+{
+    drawable_unref(drawable);
+}
+
+RedUpgradeItem::RedUpgradeItem(Drawable *init_drawable):
+    drawable(init_drawable)
+{
+    drawable->refs++;
+}
+
+/*
+ * after dcc_detach_stream_gracefully is called for all the display channel clients,
+ * video_stream_detach_drawable should be called. See comment (1).
+ */
+static void dcc_detach_stream_gracefully(DisplayChannelClient *dcc,
+                                         VideoStream *stream,
+                                         Drawable *update_area_limit)
+{
+    DisplayChannel *display = DCC_TO_DC(dcc);
+    int stream_id = display_channel_get_video_stream_id(display, stream);
+    VideoStreamAgent *agent = dcc_get_video_stream_agent(dcc, stream_id);
+
+    /* stopping the client from playing older frames at once*/
+    region_clear(&agent->clip);
+    dcc_video_stream_agent_clip(dcc, agent);
+
+    if (region_is_empty(&agent->vis_region)) {
+        spice_debug("stream %d: vis region empty", stream_id);
+        return;
+    }
+
+    if (stream->current &&
+        region_contains(&stream->current->tree_item.base.rgn, &agent->vis_region)) {
+        int n_rects;
+
+        /* (1) The caller should detach the drawable from the stream. This will
+         * lead to sending the drawable losslessly, as an ordinary drawable. */
+        if (dcc_drawable_is_in_pipe(dcc, stream->current)) {
+            spice_debug("stream %d: upgrade by linked drawable. box ==>",
+                        stream_id);
+            rect_debug(&stream->current->red_drawable->bbox);
+            goto clear_vis_region;
+        }
+        spice_debug("stream %d: upgrade by drawable. box ==>", stream_id);
+        rect_debug(&stream->current->red_drawable->bbox);
+        auto upgrade_item = red::make_shared<RedUpgradeItem>(stream->current);
+        n_rects = pixman_region32_n_rects(&upgrade_item->drawable->tree_item.base.rgn);
+        upgrade_item->rects.reset(static_cast<SpiceClipRects *>(
+            g_malloc(sizeof(SpiceClipRects) + n_rects * sizeof(SpiceRect))));
+        upgrade_item->rects->num_rects = n_rects;
+        region_ret_rects(&upgrade_item->drawable->tree_item.base.rgn,
+                         upgrade_item->rects->rects, n_rects);
+        dcc->pipe_add(upgrade_item);
+
+    } else {
+        SpiceRect upgrade_area;
+
+        region_extents(&agent->vis_region, &upgrade_area);
+        spice_debug("stream %d: upgrade by screenshot. has current %d. box ==>",
+                    stream_id, stream->current != nullptr);
+        rect_debug(&upgrade_area);
+        if (update_area_limit) {
+            display_channel_draw_until(display, &upgrade_area, display->priv->surfaces[0], update_area_limit);
+        } else {
+            display_channel_draw(display, &upgrade_area, 0);
+        }
+        dcc_add_surface_area_image(dcc, display->priv->surfaces[0], &upgrade_area,
+                                   dcc->get_pipe().end(), false);
+    }
+clear_vis_region:
+    region_clear(&agent->vis_region);
+}
+
+static void detach_video_stream_gracefully(DisplayChannel *display,
+                                           VideoStream *stream,
+                                           Drawable *update_area_limit)
+{
+    DisplayChannelClient *dcc;
+
+    FOREACH_DCC(display, dcc) {
+        dcc_detach_stream_gracefully(dcc, stream, update_area_limit);
+    }
+    if (stream->current) {
+        video_stream_detach_drawable(stream);
+    }
+}
+
+/*
+ * region  : a primary surface region. Streams that intersects with the given
+ *           region will be detached.
+ * drawable: If detaching the stream is triggered by the addition of a new drawable
+ *           that is dependent on the given region, and the drawable is already a part
+ *           of the "current tree", the drawable parameter should be set with
+ *           this drawable, otherwise, it should be NULL. Then, if detaching the stream
+ *           involves sending an upgrade image to the client, this drawable won't be rendered
+ *           (see dcc_detach_stream_gracefully).
+ */
+void video_stream_detach_behind(DisplayChannel *display,
+                                QRegion *region,
+                                Drawable *drawable)
+{
+    Ring *ring = &display->priv->streams;
+    RingItem *item = ring_get_head(ring);
+    DisplayChannelClient *dcc;
+    bool is_connected = display->is_connected();
+
+    while (item) {
+        VideoStream *stream = SPICE_CONTAINEROF(item, VideoStream, link);
+        int detach = 0;
+        item = ring_next(ring, item);
+        int stream_id = display_channel_get_video_stream_id(display, stream);
+
+        FOREACH_DCC(display, dcc) {
+            VideoStreamAgent *agent = dcc_get_video_stream_agent(dcc, stream_id);
+
+            if (region_intersects(&agent->vis_region, region)) {
+                dcc_detach_stream_gracefully(dcc, stream, drawable);
+                detach = 1;
+                spice_debug("stream %d", stream_id);
+            }
+        }
+        if (detach && stream->current) {
+            video_stream_detach_drawable(stream);
+        } else if (!is_connected) {
+            if (stream->current &&
+                region_intersects(&stream->current->tree_item.base.rgn, region)) {
+                video_stream_detach_drawable(stream);
+            }
+        }
+    }
+}
+
+void video_stream_detach_and_stop(DisplayChannel *display)
+{
+    RingItem *stream_item;
+
+    spice_debug("trace");
+    while ((stream_item = ring_get_head(&display->priv->streams))) {
+        VideoStream *stream = SPICE_CONTAINEROF(stream_item, VideoStream, link);
+
+        detach_video_stream_gracefully(display, stream, nullptr);
+        video_stream_stop(display, stream);
+    }
+}
+
+void video_stream_timeout(DisplayChannel *display)
+{
+    Ring *ring = &display->priv->streams;
+    RingItem *item;
+
+    red_time_t now = spice_get_monotonic_time_ns();
+    item = ring_get_head(ring);
+    while (item) {
+        VideoStream *stream = SPICE_CONTAINEROF(item, VideoStream, link);
+        item = ring_next(ring, item);
+        if (now >= (stream->last_time + RED_STREAM_TIMEOUT) &&
+            stream != display->priv->gl_draw_stream) {
+            detach_video_stream_gracefully(display, stream, nullptr);
+            video_stream_stop(display, stream);
+        }
+    }
+}
+
+void video_stream_trace_add_drawable(DisplayChannel *display,
+                                     Drawable *item)
+{
+    ItemTrace *trace;
+
+    if (item->stream || !item->streamable) {
+        return;
+    }
+
+    trace = &display->priv->items_trace[display->priv->next_item_trace++ & ITEMS_TRACE_MASK];
+    trace->time = item->creation_time;
+    trace->first_frame_time = item->first_frame_time;
+    trace->frames_count = item->frames_count;
+    trace->gradual_frames_count = item->gradual_frames_count;
+    trace->last_gradual_frame = item->last_gradual_frame;
+    SpiceRect* src_area = &item->red_drawable->u.copy.src_area;
+    trace->width = src_area->right - src_area->left;
+    trace->height = src_area->bottom - src_area->top;
+    trace->dest_area = item->red_drawable->bbox;
+}
+
+/*
+ * video_codecs: an array of RedVideoCodec
+ * sep: a string for separating the list elements
+ *
+ * returns a string of "enc:codec<sep>"* that must be released
+ *         with g_free.
+ */
+char *video_codecs_to_string(GArray *video_codecs, const char *sep)
+{
+    int i;
+    GString *msg = g_string_new("");
+
+    for (i = 0; i < video_codecs->len; i++) {
+        RedVideoCodec codec = g_array_index(video_codecs, RedVideoCodec, i);
+        char *codec_name = reds_get_video_codec_fullname(&codec);
+
+        g_string_append_printf(msg, "%s%s", i ? sep : "", codec_name);
+        g_free(codec_name);
+    }
+
+    return g_string_free(msg, FALSE);
+}

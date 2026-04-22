@@ -1,0 +1,37 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+if test "$1" = ""; then
+    echo "Version not provided" >&2
+    exit 1
+fi
+if ! test -d "$2"; then
+    echo "Source directory not provided" >&2
+    exit 1
+fi
+
+# generate tarball version
+echo "$1" > "$MESON_DIST_ROOT/.tarball-version"
+
+# remove useless files
+pushd "$MESON_DIST_ROOT"
+find . -name .gitignore -delete
+rm -rf \
+build-aux/useless-if-before-free \
+build-aux/vc-list-files \
+build-aux/meson-win-wrapper.txt \
+cfg.mk \
+docs/how_to_release.md \
+docs/manual/images/pepper.png \
+docs/Spice_user_manual.odt \
+GNUmakefile \
+.mailmap \
+maint.mk \
+README.Windows.md \
+server/tests/autobahn-check-report \
+server/tests/fuzzingclient.json \
+TODO.multiclient \
+.travis.yml \
+uncrustify_cfg

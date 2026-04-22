@@ -1,0 +1,40 @@
+/*** BEGIN file-header ***/
+#include <config.h>
+
+#include "spice-server-enums.h"
+
+typedef struct EnumValues {
+    int value;
+    const char *nick;
+} EnumValues;
+
+static const char *
+enum_values_get_nick(int value, const EnumValues *e)
+{
+    for (; e->nick; e++) {
+        if (e->value == value) {
+            return e->nick;
+        }
+    }
+    return "???";
+}
+
+/*** END file-header ***/
+
+/*** BEGIN value-header ***/
+
+const char *@EnumName@_get_nick(@EnumName@ value)
+{
+    static const struct EnumValues @EnumName@_values[] = {
+/*** END value-header ***/
+
+/*** BEGIN value-production ***/
+        { @VALUENAME@, "@valuenick@" },
+/*** END value-production ***/
+
+/*** BEGIN value-tail ***/
+        { 0, NULL, }
+    };
+    return enum_values_get_nick(value, @EnumName@_values);
+}
+/*** END value-tail ***/

@@ -1,0 +1,2 @@
+2035 - logo 
+    gtk_window_set_default_icon_name("spicy");
