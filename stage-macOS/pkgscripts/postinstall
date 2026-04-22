@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+APP="/Applications/GorizontVS-VDI.app"
+BIN_DIR="/usr/local/bin"
+WRAPPER="${BIN_DIR}/spicy"
+
+# На некоторых системах /usr/local/bin может отсутствовать
+mkdir -p "$BIN_DIR"
+
+# Wrapper: запускает launcher внутри bundle, который выставляет env и exec spicy.real
+cat > "$WRAPPER" <<'EOW'
+#!/bin/bash
+set -euo pipefail
+APP="/Applications/GorizontVS-VDI.app"
+exec "$APP/Contents/MacOS/spicy" "$@"
+EOW
+
+chmod 0755 "$WRAPPER"
+
+# На всякий случай: чтобы Gatekeeper не мешал после копирования
+# (обычно не нужно, но иногда атрибуты таскаются из архива)
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+
+exit 0
