@@ -1,6 +1,7 @@
 #
 #  spicy-spice-gtk client
 #
+windows = import('windows')
 
 spice_cmdline_sources = [
   'spice-cmdline.c',
@@ -44,7 +45,7 @@ if spice_gtk_has_gtk
   executable('spicy',
              sources : spicy_sources + spice_cmdline_sources,
              c_args : '-Wno-deprecated-declarations',
-             gui_app : true,          # IMPORTANT!! prevents console window
+             gui_app : false,          # IMPORTANT!! prevents console window
              install : true,
              dependencies : spice_client_gtk_dep)
 endif
